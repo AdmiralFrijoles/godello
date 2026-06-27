@@ -151,9 +151,7 @@ fn find_windows_executable(dir: &Path, console: bool) -> Result<PathBuf, Platfor
     let entries = sorted_entries(dir)?;
     let exes: Vec<PathBuf> = entries
         .into_iter()
-        .filter(|path| {
-            path.is_file() && file_name_of(path).to_ascii_lowercase().ends_with(".exe")
-        })
+        .filter(|path| path.is_file() && file_name_of(path).to_ascii_lowercase().ends_with(".exe"))
         .collect();
     let is_console = |path: &Path| file_name_of(path).to_ascii_lowercase().contains("console");
     let chosen = if console {
@@ -238,7 +236,9 @@ mod tests {
 
     /// Make a unique scratch directory for a test and remove any old copy.
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join("godello-platform-tests").join(name);
+        let dir = std::env::temp_dir()
+            .join("godello-platform-tests")
+            .join(name);
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -270,7 +270,10 @@ mod tests {
         assert_eq!(file_name_of(&editor), "Godot_v4.3-stable_win64.exe");
 
         let console = find_executable_for(&dir, Os::Windows, true).unwrap();
-        assert_eq!(file_name_of(&console), "Godot_v4.3-stable_win64_console.exe");
+        assert_eq!(
+            file_name_of(&console),
+            "Godot_v4.3-stable_win64_console.exe"
+        );
     }
 
     #[test]

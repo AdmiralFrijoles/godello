@@ -13,6 +13,10 @@ commas, question marks, apostrophes, parentheses, and colons. Keep it short and
 not verbose. This applies to code comments, these docs, the README, and commit
 messages.
 
+Never name the reference launchers in code comments or in user facing output such
+as the README or CLI help. Justify decisions on their own merits instead. Studying
+them and keeping notes under docs/research is fine.
+
 ## Workspace layout
 
 ```

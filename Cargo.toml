@@ -18,6 +18,8 @@ godello-core = { path = "crates/godello-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # Shared external dependencies are declared here and referenced from each
 # crate with `{ workspace = true }`. Versions are left to the implementation

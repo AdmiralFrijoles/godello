@@ -5,11 +5,13 @@
 //! versions on disk, and tracking projects with their bound engine version.
 
 pub mod godot_github;
+pub mod install;
 pub mod platform;
 pub mod repository;
 pub mod version;
 
 pub use godot_github::GodotGitHubRepository;
+pub use install::{Downloader, InstallError, InstallManager, InstalledEngine};
 pub use platform::{Arch, Os, PlatformError, Target};
 pub use repository::{
     Asset, Checksum, ChecksumAlgorithm, EngineRepository, HttpClient, Release, RepositoryError,

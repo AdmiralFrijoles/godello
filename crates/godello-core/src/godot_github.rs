@@ -60,7 +60,11 @@ impl<C: HttpClient> GodotGitHubRepository<C> {
         let sums = assets
             .iter()
             .find(|asset| asset.name.eq_ignore_ascii_case(SHA_SUMS_NAME))?;
-        let text = self.client.get_text(&sums.browser_download_url).await.ok()?;
+        let text = self
+            .client
+            .get_text(&sums.browser_download_url)
+            .await
+            .ok()?;
         let hex = parse_sha512sums(&text, file_name)?;
         Some(Checksum::new(ChecksumAlgorithm::Sha512, hex))
     }
@@ -80,11 +84,7 @@ impl<C: HttpClient> EngineRepository for GodotGitHubRepository<C> {
             .collect())
     }
 
-    async fn asset(
-        &self,
-        version: GodotVersion,
-        target: Target,
-    ) -> Result<Asset, RepositoryError> {
+    async fn asset(&self, version: GodotVersion, target: Target) -> Result<Asset, RepositoryError> {
         let url = format!("{}/{}", self.releases_by_tag, version.to_tag());
         let json = self.client.get_text(&url).await?;
         let release = parse_release_json(&json)?;
@@ -138,7 +138,10 @@ pub fn parse_manifest(yaml: &str) -> Result<Vec<Release>, RepositoryError> {
                     // The manifest does not say which flavors exist, so both are
                     // offered here. The asset lookup is the real check and will
                     // report when a build is missing.
-                    releases.push(Release::new(version, vec![Variant::Standard, Variant::Mono]));
+                    releases.push(Release::new(
+                        version,
+                        vec![Variant::Standard, Variant::Mono],
+                    ));
                 }
             }
         }
@@ -196,9 +199,6 @@ fn match_asset(assets: &[GhAsset], target: Target) -> Option<&GhAsset> {
 /// single universal build. Windows mono drops the exe token. The standard lists
 /// can safely include broad fragments because the matcher never returns a file
 /// whose name contains mono for a standard request.
-///
-/// Sources: the real godot-builds asset names and the suffix list in the Godots
-/// project. See docs/research/godots.md.
 fn asset_fragments(target: Target) -> Vec<&'static str> {
     match (target.variant, target.os, target.arch) {
         // Standard Linux. Modern dot form, the old underscore form, then the
@@ -415,9 +415,11 @@ mod tests {
     #[test]
     fn manifest_offers_both_variants() {
         let releases = parse_manifest(SAMPLE_MANIFEST).unwrap();
-        assert!(releases
-            .iter()
-            .all(|r| r.offers(Variant::Standard) && r.offers(Variant::Mono)));
+        assert!(
+            releases
+                .iter()
+                .all(|r| r.offers(Variant::Standard) && r.offers(Variant::Mono))
+        );
     }
 
     #[test]
@@ -439,7 +441,11 @@ mod tests {
         let tags: Vec<String> = releases.iter().map(|r| r.version.to_tag()).collect();
         assert!(tags.contains(&"4.3-stable".to_string()));
         assert!(tags.contains(&"4.2-stable".to_string()));
-        assert!(!tags.iter().any(|t| t.contains("weird") || t.contains("nonsense")));
+        assert!(
+            !tags
+                .iter()
+                .any(|t| t.contains("weird") || t.contains("nonsense"))
+        );
     }
 
     #[test]

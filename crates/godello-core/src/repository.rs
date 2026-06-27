@@ -81,11 +81,7 @@ pub trait EngineRepository {
     async fn list_releases(&self, include_pre: bool) -> Result<Vec<Release>, RepositoryError>;
 
     /// The download asset for a version on a target.
-    async fn asset(
-        &self,
-        version: GodotVersion,
-        target: Target,
-    ) -> Result<Asset, RepositoryError>;
+    async fn asset(&self, version: GodotVersion, target: Target) -> Result<Asset, RepositoryError>;
 
     /// Turn a version requirement into a single release. Picks the newest
     /// release that matches the pattern and offers the variant.
@@ -242,7 +238,10 @@ mod tests {
     }
 
     fn stable(major: u32, minor: u32, patch: u32, variants: Vec<Variant>) -> Release {
-        Release::new(GodotVersion::new(major, minor, patch, Stage::Stable), variants)
+        Release::new(
+            GodotVersion::new(major, minor, patch, Stage::Stable),
+            variants,
+        )
     }
 
     fn sample() -> FakeRepo {
@@ -294,8 +293,7 @@ mod tests {
     #[test]
     fn resolve_accepts_an_explicit_prerelease_pattern_without_the_flag() {
         let repo = sample();
-        let release =
-            block_on(repo.resolve(pattern("4.4-rc1"), Variant::Standard, false)).unwrap();
+        let release = block_on(repo.resolve(pattern("4.4-rc1"), Variant::Standard, false)).unwrap();
         assert_eq!(release.version, GodotVersion::new(4, 4, 0, Stage::Rc(1)));
     }
 
@@ -341,7 +339,10 @@ mod tests {
     }
 
     fn rc(major: u32, minor: u32, patch: u32, n: u32, variants: Vec<Variant>) -> Release {
-        Release::new(GodotVersion::new(major, minor, patch, Stage::Rc(n)), variants)
+        Release::new(
+            GodotVersion::new(major, minor, patch, Stage::Rc(n)),
+            variants,
+        )
     }
 
     fn repo_with(releases: Vec<Release>) -> FakeRepo {
@@ -428,8 +429,7 @@ mod tests {
             rc(4, 4, 0, 1, vec![Variant::Standard]),
             rc(4, 4, 0, 2, vec![Variant::Standard]),
         ]);
-        let release =
-            block_on(repo.resolve(pattern("4.4-rc1"), Variant::Standard, false)).unwrap();
+        let release = block_on(repo.resolve(pattern("4.4-rc1"), Variant::Standard, false)).unwrap();
         assert_eq!(release.version, GodotVersion::new(4, 4, 0, Stage::Rc(1)));
     }
 
@@ -456,7 +456,12 @@ mod tests {
 
     #[test]
     fn resolve_returns_the_full_release_with_its_variants() {
-        let repo = repo_with(vec![stable(4, 2, 0, vec![Variant::Standard, Variant::Mono])]);
+        let repo = repo_with(vec![stable(
+            4,
+            2,
+            0,
+            vec![Variant::Standard, Variant::Mono],
+        )]);
         let release = block_on(repo.resolve(pattern("4.2"), Variant::Mono, false)).unwrap();
         assert!(release.offers(Variant::Standard));
         assert!(release.offers(Variant::Mono));

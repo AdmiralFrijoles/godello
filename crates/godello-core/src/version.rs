@@ -115,7 +115,9 @@ impl FromStr for Stage {
             return Ok(Stage::Stable);
         }
         // Split the leading letters from the trailing number, for example rc1.
-        let split = lower.find(|c: char| c.is_ascii_digit()).unwrap_or(lower.len());
+        let split = lower
+            .find(|c: char| c.is_ascii_digit())
+            .unwrap_or(lower.len());
         let (name, number_part) = lower.split_at(split);
         let number: u32 = if number_part.is_empty() {
             0
@@ -388,14 +390,26 @@ mod tests {
 
     #[test]
     fn tag_drops_zero_patch() {
-        assert_eq!(GodotVersion::new(4, 3, 0, Stage::Stable).to_tag(), "4.3-stable");
-        assert_eq!(GodotVersion::new(4, 2, 1, Stage::Stable).to_tag(), "4.2.1-stable");
+        assert_eq!(
+            GodotVersion::new(4, 3, 0, Stage::Stable).to_tag(),
+            "4.3-stable"
+        );
+        assert_eq!(
+            GodotVersion::new(4, 2, 1, Stage::Stable).to_tag(),
+            "4.2.1-stable"
+        );
         assert_eq!(GodotVersion::new(4, 0, 0, Stage::Rc(2)).to_tag(), "4.0-rc2");
     }
 
     #[test]
     fn tag_round_trips() {
-        for tag in ["4.3-stable", "4.2.1-stable", "4.0-rc1", "3.5-beta3", "4.4-dev2"] {
+        for tag in [
+            "4.3-stable",
+            "4.2.1-stable",
+            "4.0-rc1",
+            "3.5-beta3",
+            "4.4-dev2",
+        ] {
             let v = GodotVersion::parse_tag(tag).unwrap();
             assert_eq!(v.to_tag(), tag);
         }
