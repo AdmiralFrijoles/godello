@@ -3,11 +3,11 @@
 //! Holds the shared logic used by the gdctl CLI and the iced GUI. That covers
 //! discovering and downloading Godot engine versions, managing installed
 //! versions on disk, and tracking projects with their bound engine version.
-//!
-//! This is the start of the implementation. See docs/plan.md for the full plan.
 
+pub mod platform;
 pub mod version;
 
+pub use platform::{Arch, Os, PlatformError, Target};
 pub use version::{GodotVersion, Stage, Variant, VersionParseError, VersionPattern};
 
 /// Name of the application, shown in user facing output.
