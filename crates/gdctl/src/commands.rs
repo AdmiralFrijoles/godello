@@ -46,8 +46,8 @@ pub async fn dispatch(ctx: &mut Context, command: Command) -> Result<()> {
         Command::Open { version, variant } => open(ctx, version, variant.selected()).await,
         Command::Project { command } => project(ctx, command).await,
         Command::Clone { url, dir } => clone(ctx, &url, dir).await,
-        Command::Run => run_current(ctx).await,
-        Command::Edit => edit_current(ctx).await,
+        Command::Run { no_build } => run_current(ctx, no_build).await,
+        Command::Edit { no_build } => edit_current(ctx, no_build).await,
         Command::Settings { command } => settings(ctx, command),
     }
 }
@@ -216,13 +216,13 @@ async fn project(ctx: &mut Context, command: ProjectCommand) -> Result<()> {
         ProjectCommand::Add { path } => project_add(ctx, &path),
         ProjectCommand::List => project_list(ctx),
         ProjectCommand::Pin { path, version } => project_pin(ctx, &path, version),
-        ProjectCommand::Edit { path } => {
+        ProjectCommand::Edit { path, no_build } => {
             let dir = existing_dir(&path)?;
-            edit_project(ctx, &dir).await
+            edit_project(ctx, &dir, no_build).await
         }
-        ProjectCommand::Run { path } => {
+        ProjectCommand::Run { path, no_build } => {
             let dir = existing_dir(&path)?;
-            run_project_dir(ctx, &dir).await
+            run_project_dir(ctx, &dir, no_build).await
         }
         ProjectCommand::Remove { path } => project_remove(ctx, &path),
         ProjectCommand::Status { path } => project_status(ctx, &path),
@@ -338,24 +338,25 @@ fn project_update(ctx: &Context, path: &Path, reset: bool) -> Result<()> {
 
 // Current folder shortcuts.
 
-async fn edit_current(ctx: &Context) -> Result<()> {
+async fn edit_current(ctx: &Context, no_build: bool) -> Result<()> {
     let dir = current_project_dir()?;
-    edit_project(ctx, &dir).await
+    edit_project(ctx, &dir, no_build).await
 }
 
-async fn run_current(ctx: &Context) -> Result<()> {
+async fn run_current(ctx: &Context, no_build: bool) -> Result<()> {
     let dir = current_project_dir()?;
-    run_project_dir(ctx, &dir).await
+    run_project_dir(ctx, &dir, no_build).await
 }
 
-async fn edit_project(ctx: &Context, dir: &Path) -> Result<()> {
+async fn edit_project(ctx: &Context, dir: &Path, no_build: bool) -> Result<()> {
     let project = GodotProject::load(dir)
         .with_context(|| format!("could not read the project in {}", dir.display()))?;
     ensure_project_engine(ctx, &project).await?;
-    announce_launch(ctx, &project, "Opening the editor for");
+    let settings = launch_settings(&ctx.settings, no_build);
+    announce_launch(ctx, &settings, &project, "Opening the editor for");
     open_editor(
         &ctx.install_manager(),
-        &ctx.settings,
+        &settings,
         &project,
         &SystemCommandRunner,
         &SystemLauncher,
@@ -364,14 +365,15 @@ async fn edit_project(ctx: &Context, dir: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn run_project_dir(ctx: &Context, dir: &Path) -> Result<()> {
+async fn run_project_dir(ctx: &Context, dir: &Path, no_build: bool) -> Result<()> {
     let project = GodotProject::load(dir)
         .with_context(|| format!("could not read the project in {}", dir.display()))?;
     ensure_project_engine(ctx, &project).await?;
-    announce_launch(ctx, &project, "Running");
+    let settings = launch_settings(&ctx.settings, no_build);
+    announce_launch(ctx, &settings, &project, "Running");
     run_project(
         &ctx.install_manager(),
-        &ctx.settings,
+        &settings,
         &project,
         &SystemCommandRunner,
         &SystemLauncher,
@@ -380,10 +382,21 @@ async fn run_project_dir(ctx: &Context, dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The settings to launch with. The no_build flag turns the C# build off for
+/// this one launch, leaving the saved setting alone. It only turns a build off,
+/// never on, so a project that does not need one is unaffected.
+fn launch_settings(base: &Settings, no_build: bool) -> Settings {
+    let mut settings = base.clone();
+    if no_build {
+        settings.build_csharp_before_launch = false;
+    }
+    settings
+}
+
 /// Print a short note before a launch, including the C# build step when it will
 /// run, so the user knows what is about to happen before the editor takes over.
-fn announce_launch(ctx: &Context, project: &GodotProject, action: &str) {
-    if ctx.settings.build_csharp_before_launch && project.uses_csharp {
+fn announce_launch(ctx: &Context, settings: &Settings, project: &GodotProject, action: &str) {
+    if settings.build_csharp_before_launch && project.uses_csharp {
         say!(ctx, "Building the C# solution first...");
     }
     let label = project.name.as_deref().unwrap_or("the project");
@@ -653,6 +666,26 @@ mod tests {
         assert!(describe_block(BlockReason::LocalChanges).contains("local changes"));
         assert!(describe_block(BlockReason::Diverged).contains("--reset"));
         assert!(describe_block(BlockReason::NoRemote).contains("no tracked remote"));
+    }
+
+    #[test]
+    fn no_build_only_turns_the_csharp_build_off() {
+        let on = Settings {
+            build_csharp_before_launch: true,
+            ..Settings::default()
+        };
+        // The flag overrides an enabled build for this launch.
+        assert!(!launch_settings(&on, true).build_csharp_before_launch);
+        // Without the flag the setting is untouched.
+        assert!(launch_settings(&on, false).build_csharp_before_launch);
+
+        let off = Settings {
+            build_csharp_before_launch: false,
+            ..Settings::default()
+        };
+        // It never turns a build on, it only leaves it off.
+        assert!(!launch_settings(&off, true).build_csharp_before_launch);
+        assert!(!launch_settings(&off, false).build_csharp_before_launch);
     }
 
     #[test]

@@ -90,9 +90,17 @@ pub enum Command {
         dir: Option<PathBuf>,
     },
     /// Run the project in the current folder without the editor.
-    Run,
+    Run {
+        /// Skip building the C# solution even when that setting is on.
+        #[arg(long = "no-build")]
+        no_build: bool,
+    },
     /// Open the editor for the project in the current folder.
-    Edit,
+    Edit {
+        /// Skip building the C# solution even when that setting is on.
+        #[arg(long = "no-build")]
+        no_build: bool,
+    },
     /// Read or change a setting.
     Settings {
         #[command(subcommand)]
@@ -114,9 +122,19 @@ pub enum ProjectCommand {
         version: VersionPattern,
     },
     /// Open the editor for a project.
-    Edit { path: PathBuf },
+    Edit {
+        path: PathBuf,
+        /// Skip building the C# solution even when that setting is on.
+        #[arg(long = "no-build")]
+        no_build: bool,
+    },
     /// Run a project without the editor.
-    Run { path: PathBuf },
+    Run {
+        path: PathBuf,
+        /// Skip building the C# solution even when that setting is on.
+        #[arg(long = "no-build")]
+        no_build: bool,
+    },
     /// Forget a project.
     Remove { path: PathBuf },
     /// Show the branch, sync state, and local changes.
@@ -373,11 +391,44 @@ mod tests {
     fn run_and_edit_take_no_path() {
         assert!(matches!(
             parse(&["gdctl", "run"]).command,
-            Some(Command::Run)
+            Some(Command::Run { no_build: false })
         ));
         assert!(matches!(
             parse(&["gdctl", "edit"]).command,
-            Some(Command::Edit)
+            Some(Command::Edit { no_build: false })
         ));
+    }
+
+    #[test]
+    fn run_and_edit_take_no_build() {
+        assert!(matches!(
+            parse(&["gdctl", "run", "--no-build"]).command,
+            Some(Command::Run { no_build: true })
+        ));
+        assert!(matches!(
+            parse(&["gdctl", "edit", "--no-build"]).command,
+            Some(Command::Edit { no_build: true })
+        ));
+    }
+
+    #[test]
+    fn project_edit_and_run_take_no_build() {
+        let cli = parse(&["gdctl", "project", "edit", "/games/one", "--no-build"]);
+        match cli.command.unwrap() {
+            Command::Project {
+                command: ProjectCommand::Edit { path, no_build },
+            } => {
+                assert_eq!(path, PathBuf::from("/games/one"));
+                assert!(no_build);
+            }
+            other => panic!("expected project edit, got {other:?}"),
+        }
+        let cli = parse(&["gdctl", "project", "run", "/games/one"]);
+        match cli.command.unwrap() {
+            Command::Project {
+                command: ProjectCommand::Run { no_build, .. },
+            } => assert!(!no_build),
+            other => panic!("expected project run, got {other:?}"),
+        }
     }
 }

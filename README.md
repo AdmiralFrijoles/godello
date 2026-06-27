@@ -54,6 +54,7 @@ Projects:
 gdctl project add path/to/game
 gdctl project pin path/to/game 4.3   # write the required version into project.godot
 gdctl edit                           # open the editor for the project in this folder
+gdctl edit --no-build                # skip the C# build for this launch
 gdctl run                            # run the project in this folder
 gdctl project status path/to/game    # branch, sync state, local changes
 gdctl project update path/to/game    # bring it up to date with its remote
