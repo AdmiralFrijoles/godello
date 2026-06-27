@@ -1,0 +1,194 @@
+name: Release
+
+# Builds gdctl for every supported platform and publishes a release whenever main
+# moves forward. The version is worked out from the commits since the last tag,
+# the same way the other projects do it, so a normal merge to main cuts a release.
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '.github/**'
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Force version bump type (overrides auto)'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  # Work out the next version from the commits since the last tag. Everything
+  # downstream is skipped when there is nothing new to release.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      commits-since-tag: ${{ steps.version.outputs.commits-since-tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history is required to count commits since the tag
+
+      - name: Calculate version
+        id: version
+        uses: arcmantle/prospector@v1.1.0
+        with:
+          suggest: ${{ github.event.inputs.bump }}
+
+  # Build one binary per platform. Linux also produces an AppImage.
+  build:
+    needs: version
+    if: needs.version.outputs.commits-since-tag != '0'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            appimage: true
+          - name: linux-aarch64
+            os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            appimage: true
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            appimage: false
+          - name: macos-x86_64
+            os: macos-13
+            target: x86_64-apple-darwin
+            appimage: false
+          - name: macos-aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+            appimage: false
+    runs-on: ${{ matrix.os }}
+    env:
+      # The version the binary reports through gdctl --version.
+      GODELLO_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The GUI links wayland and xkbcommon, so the Linux build needs their dev
+      # packages. The file dialog uses the desktop portal over DBus, so no GTK is
+      # needed. fuse is for running the AppImage tooling.
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libxkbcommon-dev libwayland-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} -p gdctl
+
+      - name: Package archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.version.outputs.version }}"
+          target="${{ matrix.target }}"
+          mkdir -p dist staging
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/$target/release/gdctl.exe" staging/
+            cp README.md staging/ 2>/dev/null || true
+            ( cd staging && 7z a "../dist/gdctl-$version-$target.zip" . )
+          else
+            cp "target/$target/release/gdctl" staging/
+            cp README.md staging/ 2>/dev/null || true
+            tar -czf "dist/gdctl-$version-$target.tar.gz" -C staging .
+          fi
+
+      # Bundle the binary and its libraries into a single AppImage. linuxdeploy is
+      # run extracted rather than mounted, since the runners have no FUSE.
+      - name: Build AppImage
+        if: matrix.appimage
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.version.outputs.version }}"
+          target="${{ matrix.target }}"
+          arch="$(uname -m)"
+
+          appdir=AppDir
+          mkdir -p "$appdir/usr/bin"
+          mkdir -p "$appdir/usr/share/applications"
+          mkdir -p "$appdir/usr/share/icons/hicolor/256x256/apps"
+          cp "target/$target/release/gdctl" "$appdir/usr/bin/"
+          cp packaging/godello.desktop "$appdir/usr/share/applications/"
+          cp packaging/godello.png "$appdir/usr/share/icons/hicolor/256x256/apps/"
+
+          tool="linuxdeploy-$arch.AppImage"
+          curl -sSLO "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/$tool"
+          chmod +x "$tool"
+
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          export OUTPUT="Godello-$version-$arch.AppImage"
+          "./$tool" \
+            --appdir "$appdir" \
+            --executable "$appdir/usr/bin/gdctl" \
+            --desktop-file packaging/godello.desktop \
+            --icon-file packaging/godello.png \
+            --output appimage
+          mv "$OUTPUT" dist/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  # Tag the commit and publish the release with every platform's artifacts.
+  release:
+    needs: [version, build]
+    if: needs.version.outputs.commits-since-tag != '0'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Tag and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ needs.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v$version"
+          git push origin "v$version"
+          gh release create "v$version" dist/* \
+            --title "v$version" \
+            --generate-notes \
+            --latest

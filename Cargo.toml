@@ -10,7 +10,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-repository = "https://github.com/jason/godello"
+repository = "https://github.com/AdmiralFrijoles/godello"
 authors = ["Jason Gagner <gagner.jason@pm.me>"]
 
 [workspace.dependencies]

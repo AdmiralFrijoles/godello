@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Godello
+GenericName=Godot launcher
+Comment=Install Godot engines and launch your projects
+Exec=gdctl
+Icon=godello
+Categories=Development;
+Terminal=false

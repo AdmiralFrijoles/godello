@@ -9,11 +9,19 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 use godello_core::{Variant, VersionPattern};
 
+/// The version shown by gdctl. A release build sets GODELLO_VERSION so the binary
+/// reports the version the release was tagged with. A normal build falls back to
+/// the version in Cargo.toml.
+pub const VERSION: &str = match option_env!("GODELLO_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 /// Godello engine and project launcher.
 #[derive(Debug, Parser)]
 #[command(
     name = "gdctl",
-    version,
+    version = VERSION,
     about = "Godello: a Godot engine and project launcher"
 )]
 pub struct Cli {

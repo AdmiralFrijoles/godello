@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <rect width="256" height="256" rx="56" fill="#1c1e24"/>
+  <rect x="20" y="20" width="216" height="216" rx="44" fill="#6e7be8"/>
+  <text x="128" y="138" text-anchor="middle" dominant-baseline="central"
+        font-family="DejaVu Sans, Arial, sans-serif" font-weight="700" font-size="150"
+        fill="#ffffff">G</text>
+</svg>
