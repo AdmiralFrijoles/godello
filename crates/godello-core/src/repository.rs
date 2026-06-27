@@ -115,6 +115,15 @@ pub trait EngineRepository {
     }
 }
 
+/// A small fetch contract so a source can read remote text without depending on
+/// a specific http library. The real client lives in the binary. Tests use a
+/// fake client with canned responses.
+#[allow(async_fn_in_trait)]
+pub trait HttpClient {
+    /// Fetch a url and return its body as text.
+    async fn get_text(&self, url: &str) -> Result<String, RepositoryError>;
+}
+
 /// An error from a repository.
 #[derive(Debug)]
 pub enum RepositoryError {

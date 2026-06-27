@@ -94,6 +94,39 @@ There is no solution build or dotnet build step before launch. The Godot editor
 handles C# builds. Mono awareness is limited to detecting the mono section or mono
 token for editor matching. Godello will add the pre launch C# build.
 
+## Asset filename conventions across versions
+
+Godots keeps one suffix list per platform and treats an asset as a match when its
+name ends with any suffix. It does no arch picking beyond a coarse 32 or 64
+filter, and it finds mono only by the substring mono. The list from its source:
+
+- Linux: _x11.64.zip, _linux.64.zip, _linux.x86_64.zip, _linux.x86_32.zip,
+  _linux_x86_64.zip, _linux_x86_32.zip. Note both the dot and underscore forms.
+- Mac: _osx.universal.zip, _macos.universal.zip, _osx.fat.zip, _osx32.zip,
+  _osx64.zip.
+- Windows: _win64.exe.zip, _win32.exe.zip, _win64.zip, _win32.zip.
+
+Godello goes further than this. We pick by real cpu arch including arm64, and we
+match mono by concrete file shapes. The full set Godello supports, gathered from
+the real godot-builds assets plus the Godots list:
+
+- Linux standard: linux.x86_64, linux_x86_64, x11.64, linux.64 and the 32 and
+  arm64 equivalents.
+- Linux mono: mono_linux_x86_64, mono_x11_64, mono_linux.64 and the 32 and arm64
+  equivalents.
+- Windows standard: win64.exe, win64 and the 32 and arm64 equivalents.
+- Windows mono: mono_win64, mono_win32, mono_windows_arm64. The mono Windows zip
+  has no exe token.
+- Mac standard: macos.universal, osx.universal, osx.fat, osx.64, osx64, osx.32,
+  osx32. One build serves every arch, and 64 is preferred over 32.
+- Mac mono: mono_macos.universal, mono_osx.universal, mono_osx.fat, mono_osx.64,
+  mono_osx64.
+
+The matcher never returns a name containing mono for a standard request, which is
+what makes the broad standard fragments safe. This logic lives in
+crates/godello-core/src/github.rs with tests against the real 4.3 names and the
+older 3.x and 2.x names.
+
 ## Takeaways for Godello
 
 1. Binding is the editor path (source of truth) plus a fuzzy version hint (the
