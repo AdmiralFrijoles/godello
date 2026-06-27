@@ -149,8 +149,8 @@ impl fmt::Display for RepositoryError {
                 write!(
                     f,
                     "no {} {} download for {} on {}",
-                    target.variant,
                     version.to_tag(),
+                    target.variant,
                     target.arch,
                     target.os
                 )

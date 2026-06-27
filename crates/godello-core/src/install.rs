@@ -379,10 +379,10 @@ impl std::fmt::Display for InstallError {
                 "checksum did not match, expected {expected} but got {actual}"
             ),
             InstallError::AlreadyInstalled { variant, version } => {
-                write!(f, "{variant} {} is already installed", version.to_tag())
+                write!(f, "{} {variant} is already installed", version.to_tag())
             }
             InstallError::NotInstalled { variant, version } => {
-                write!(f, "{variant} {} is not installed", version.to_tag())
+                write!(f, "{} {variant} is not installed", version.to_tag())
             }
             InstallError::Extract(msg) => write!(f, "could not extract archive: {msg}"),
             InstallError::UnsafePath(name) => write!(f, "archive has an unsafe path: {name}"),

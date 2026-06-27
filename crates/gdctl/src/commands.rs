@@ -77,7 +77,7 @@ fn remove(ctx: &Context, pattern: VersionPattern, variant: Option<Variant>) -> R
         .best_match(&installed)
         .ok_or_else(|| anyhow!("no installed {variant} engine matches {pattern}"))?;
     manager.remove(variant, version)?;
-    say!(ctx, "Removed {variant} {}", version.to_tag());
+    say!(ctx, "Removed {} {variant}", version.to_tag());
     Ok(())
 }
 
@@ -91,9 +91,9 @@ fn list_local(ctx: &Context) -> Result<()> {
     for engine in engines {
         say!(
             ctx,
-            "{:9} {}",
-            engine.variant.as_str(),
-            engine.version.to_tag()
+            "{:14} {}",
+            engine.version.to_tag(),
+            engine.variant.as_str()
         );
     }
     Ok(())
@@ -164,7 +164,7 @@ async fn open(
                 .resolve(pattern, variant, ctx.settings.include_prereleases)
                 .await
                 .with_context(|| format!("could not find a {variant} release for {pattern}"))?;
-            let label = format!("{variant} {}", release.version.to_tag());
+            let label = format!("{} {variant}", release.version.to_tag());
             if !ctx.confirm(&format!("{label} is not installed. Install it now?"), true) {
                 bail!("{label} is not installed");
             }
@@ -174,7 +174,7 @@ async fn open(
     };
     say!(
         ctx,
-        "Opening the project manager with {variant} {}...",
+        "Opening the project manager with {} {variant}...",
         version.to_tag()
     );
     // The project manager has no C# build, so the detached choice applies cleanly.
@@ -194,7 +194,7 @@ async fn open(
 async fn install_version(ctx: &Context, variant: Variant, version: GodotVersion) -> Result<()> {
     let manager = ctx.install_manager();
     if manager.is_installed(variant, version) {
-        say!(ctx, "{variant} {} is already installed.", version.to_tag());
+        say!(ctx, "{} {variant} is already installed.", version.to_tag());
         return Ok(());
     }
     let target = Target::current(variant);
@@ -202,8 +202,8 @@ async fn install_version(ctx: &Context, variant: Variant, version: GodotVersion)
         .repository()
         .asset(version, target)
         .await
-        .with_context(|| format!("no download for {variant} {}", version.to_tag()))?;
-    say!(ctx, "Downloading {variant} {}...", version.to_tag());
+        .with_context(|| format!("no download for {} {variant}", version.to_tag()))?;
+    say!(ctx, "Downloading {} {variant}...", version.to_tag());
     // A silent run shows no bar either. The bar draws to stderr, but silent means
     // quiet, so swap in the sink that reports nothing.
     if ctx.silent {
@@ -211,12 +211,12 @@ async fn install_version(ctx: &Context, variant: Variant, version: GodotVersion)
             .install(&asset, variant, version, ctx.client(), &NoProgress)
             .await?;
     } else {
-        let progress = BarProgress::new(format!("{variant} {}", version.to_tag()));
+        let progress = BarProgress::new(format!("{} {variant}", version.to_tag()));
         manager
             .install(&asset, variant, version, ctx.client(), &progress)
             .await?;
     }
-    say!(ctx, "Installed {variant} {}", version.to_tag());
+    say!(ctx, "Installed {} {variant}", version.to_tag());
     Ok(())
 }
 
@@ -458,7 +458,7 @@ async fn ensure_project_engine(ctx: &Context, project: &GodotProject) -> Result<
                 .resolve(pattern, req_variant, ctx.settings.include_prereleases)
                 .await
                 .with_context(|| format!("could not find a {req_variant} release for {pattern}"))?;
-            let label = format!("{req_variant} {}", release.version.to_tag());
+            let label = format!("{} {req_variant}", release.version.to_tag());
             if !ctx.confirm(
                 &format!("{label} is required but not installed. Install it now?"),
                 true,
