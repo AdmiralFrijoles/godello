@@ -360,8 +360,8 @@ mod tests {
     fn discover_resolves_on_this_platform() {
         // Just confirm it produces some paths without error here.
         let paths = Paths::discover().unwrap();
-        assert!(paths.config_dir().as_os_str().len() > 0);
-        assert!(paths.data_dir().as_os_str().len() > 0);
+        assert!(!paths.config_dir().as_os_str().is_empty());
+        assert!(!paths.data_dir().as_os_str().is_empty());
     }
 
     // Settings defaults and round trip.
@@ -414,10 +414,12 @@ mod tests {
     fn settings_round_trip() {
         let dir = scratch("settings-round");
         let path = dir.join("settings.toml");
-        let mut settings = Settings::default();
-        settings.include_prereleases = true;
-        settings.default_variant = Variant::Mono;
-        settings.engine_install_dir = Some(PathBuf::from("/opt/godot-engines"));
+        let settings = Settings {
+            include_prereleases: true,
+            default_variant: Variant::Mono,
+            engine_install_dir: Some(PathBuf::from("/opt/godot-engines")),
+            ..Settings::default()
+        };
         settings.save(&path).unwrap();
         let loaded = Settings::load(&path).unwrap();
         assert_eq!(loaded, settings);
@@ -447,8 +449,10 @@ mod tests {
     fn default_variant_serializes_as_a_word() {
         let dir = scratch("settings-variant-word");
         let path = dir.join("settings.toml");
-        let mut settings = Settings::default();
-        settings.default_variant = Variant::Mono;
+        let settings = Settings {
+            default_variant: Variant::Mono,
+            ..Settings::default()
+        };
         settings.save(&path).unwrap();
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("default_variant = \"mono\""));
@@ -469,8 +473,10 @@ mod tests {
     #[test]
     fn effective_engines_dir_uses_override_when_set() {
         let paths = Paths::with_dirs("/cfg", "/data");
-        let mut settings = Settings::default();
-        settings.engine_install_dir = Some(PathBuf::from("/elsewhere"));
+        let settings = Settings {
+            engine_install_dir: Some(PathBuf::from("/elsewhere")),
+            ..Settings::default()
+        };
         assert_eq!(
             settings.effective_engines_dir(&paths),
             PathBuf::from("/elsewhere")

@@ -776,16 +776,14 @@ mod tests {
         let (manifest, tags) = endpoints();
         let tag_url = format!("{tags}/4.3-stable");
         let hash = "f".repeat(128);
-        let release_json = format!(
-            r#"{{ "assets": [
-                {{ "name": "Godot_v4.3-stable_linux.x86_64.zip", "browser_download_url": "https://dl.test/editor.zip" }},
-                {{ "name": "SHA512-SUMS.txt", "browser_download_url": "https://dl.test/sums" }}
-            ] }}"#
-        );
+        let release_json = r#"{ "assets": [
+                { "name": "Godot_v4.3-stable_linux.x86_64.zip", "browser_download_url": "https://dl.test/editor.zip" },
+                { "name": "SHA512-SUMS.txt", "browser_download_url": "https://dl.test/sums" }
+            ] }"#;
         let sums = format!("{hash}  Godot_v4.3-stable_linux.x86_64.zip\n");
         let client = FakeClient::new()
             .with(manifest, SAMPLE_MANIFEST)
-            .with(&tag_url, &release_json)
+            .with(&tag_url, release_json)
             .with("https://dl.test/sums", &sums);
         let repo = GodotGitHubRepository::with_endpoints(client, manifest, tags);
 

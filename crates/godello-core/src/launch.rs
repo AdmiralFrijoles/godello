@@ -467,8 +467,10 @@ mod tests {
         let project = write_project(&proj_dir, PLAIN);
         let runner = FakeRunner::new();
 
-        let mut settings = Settings::default();
-        settings.launch_detached = true;
+        let settings = Settings {
+            launch_detached: true,
+            ..Settings::default()
+        };
         let launcher = FakeLauncher::new();
         open_editor(&manager, &settings, &project, &runner, &launcher).unwrap();
         let (_program, _args, detached) = launcher.last();
@@ -496,8 +498,10 @@ mod tests {
         let manager = InstallManager::new(&root, root.join("dl"));
         let proj_dir = scratch("cs-nobuild-proj");
         let project = write_project(&proj_dir, CSHARP);
-        let mut settings = Settings::default();
-        settings.build_csharp_before_launch = false;
+        let settings = Settings {
+            build_csharp_before_launch: false,
+            ..Settings::default()
+        };
         let runner = FakeRunner::new();
         let launcher = FakeLauncher::new();
         open_editor(&manager, &settings, &project, &runner, &launcher).unwrap();
