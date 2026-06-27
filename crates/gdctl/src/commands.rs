@@ -108,7 +108,7 @@ async fn list_remote(ctx: &Context, pre: bool) -> Result<()> {
         return Ok(());
     }
     // Newest first reads best for a human scanning the list.
-    releases.sort_by(|a, b| b.version.cmp(&a.version));
+    releases.sort_by_key(|release| std::cmp::Reverse(release.version));
     for release in releases {
         say!(
             ctx,
@@ -136,7 +136,7 @@ async fn search(ctx: &Context, text: &str) -> Result<()> {
         say!(ctx, "No versions match {text}.");
         return Ok(());
     }
-    releases.sort_by(|a, b| b.version.cmp(&a.version));
+    releases.sort_by_key(|release| std::cmp::Reverse(release.version));
     for release in releases {
         say!(
             ctx,

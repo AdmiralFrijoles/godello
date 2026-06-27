@@ -185,7 +185,7 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
         }
         Message::RemoteLoaded(Ok(mut releases)) => {
             // Newest first, matching the CLI listing.
-            releases.sort_by(|a, b| b.version.cmp(&a.version));
+            releases.sort_by_key(|release| std::cmp::Reverse(release.version));
             state.remote = Load::Loaded(releases);
             Task::none()
         }
