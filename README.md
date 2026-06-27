@@ -6,7 +6,8 @@ projects pinned to the version they need. Works on Linux, Windows, and Mac.
 Godello runs as a single binary named gdctl. Use it from the command line for
 everything, or run it with no subcommand to open the desktop app.
 
-Status: the command line core works. The desktop app is not built yet.
+Status: the command line core works. The desktop app has started. It can list,
+install, and remove engines today. The projects and settings screens are next.
 
 ## Features
 
@@ -79,8 +80,7 @@ gdctl settings get default_variant
 gdctl settings set build_csharp_before_launch false
 ```
 
-Running gdctl with no arguments will open the desktop app once it exists. For now
-it prints help.
+Running gdctl with no arguments opens the desktop app.
 
 ## License
 

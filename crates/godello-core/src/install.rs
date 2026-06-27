@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use sha2::{Digest, Sha256, Sha512};
 
@@ -28,7 +29,11 @@ pub struct InstalledEngine {
 /// Receives download progress as bytes arrive. The total is optional because a
 /// server may not send a content length. Every method takes a shared reference
 /// so one sink can be passed through a download by reference.
-pub trait DownloadProgress {
+///
+/// Sinks must be safe to share across threads. A download future may run on a
+/// multi thread executor and hold the sink by reference across an await, so the
+/// reference has to be Send, which needs the sink to be Sync.
+pub trait DownloadProgress: Send + Sync {
     /// Called once before any bytes, with the total size when it is known.
     fn start(&self, total: Option<u64>);
     /// Called as bytes arrive, with the running total downloaded so far.
@@ -145,17 +150,19 @@ impl InstallManager {
         platform::find_executable(&dir, console).map_err(InstallError::Executable)
     }
 
-    /// Download, verify, and extract a version into place. The work happens in a
-    /// temp folder that is renamed into the final path at the end, so a failed
-    /// install never leaves a half written version behind.
-    pub async fn install<D: Downloader>(
+    /// Download and verify a version, leaving the archive ready to install.
+    ///
+    /// This is the async half of an install. Returns the archive path on disk.
+    /// The extract step is install_archive, kept separate so a caller can run the
+    /// blocking extract off the async executor and cancel it.
+    pub async fn fetch<D: Downloader>(
         &self,
         asset: &Asset,
         variant: Variant,
         version: GodotVersion,
         downloader: &D,
         progress: &dyn DownloadProgress,
-    ) -> Result<InstalledEngine, InstallError> {
+    ) -> Result<PathBuf, InstallError> {
         let target_dir = self.install_dir(variant, version);
         if target_dir.exists() {
             return Err(InstallError::AlreadyInstalled { variant, version });
@@ -169,16 +176,45 @@ impl InstallManager {
             .download_to(&asset.url, &partial_path, progress)
             .await?;
 
-        if let Some(checksum) = &asset.checksum {
-            verify_file(&partial_path, checksum)?;
-        }
+        // The verify is deliberately not here. It is in install_archive so the
+        // whole blocking tail (verify and extract) runs off the async executor.
         fs::rename(&partial_path, &archive_path)?;
+        Ok(archive_path)
+    }
 
+    /// Extract a fetched archive into place. The work happens in a temp folder
+    /// renamed into the final path at the end, so a failed or cancelled install
+    /// never leaves a half written version behind.
+    ///
+    /// This is synchronous and blocking. The cancelled flag is checked between
+    /// archive entries, so setting it stops the extract promptly and cleans up.
+    pub fn install_archive(
+        &self,
+        archive_path: &Path,
+        variant: Variant,
+        version: GodotVersion,
+        checksum: Option<&Checksum>,
+        cancelled: &AtomicBool,
+    ) -> Result<InstalledEngine, InstallError> {
+        // Verify here, in the blocking phase, so hashing a large file does not
+        // stall the async executor. A bad archive is deleted so a retry refetches.
+        if let Some(checksum) = checksum {
+            if let Err(err) = verify_file(archive_path, checksum) {
+                let _ = fs::remove_file(archive_path);
+                return Err(err);
+            }
+        }
+
+        let target_dir = self.install_dir(variant, version);
         let variant_dir = self.engines_root.join(variant.as_str());
         fs::create_dir_all(&variant_dir)?;
         let temp_dir = variant_dir.join(format!(".{}.tmp", version.to_tag()));
         let _ = fs::remove_dir_all(&temp_dir);
-        extract_zip(&archive_path, &temp_dir)?;
+
+        if let Err(err) = extract_zip_cancelable(archive_path, &temp_dir, cancelled) {
+            let _ = fs::remove_dir_all(&temp_dir);
+            return Err(err);
+        }
         fs::rename(&temp_dir, &target_dir)?;
 
         Ok(InstalledEngine {
@@ -186,6 +222,29 @@ impl InstallManager {
             version,
             path: target_dir,
         })
+    }
+
+    /// Download, verify, and extract a version into place, in one call. This
+    /// cannot be cancelled, which suits the command line. The desktop app uses
+    /// fetch and install_archive so it can cancel and stay responsive.
+    pub async fn install<D: Downloader>(
+        &self,
+        asset: &Asset,
+        variant: Variant,
+        version: GodotVersion,
+        downloader: &D,
+        progress: &dyn DownloadProgress,
+    ) -> Result<InstalledEngine, InstallError> {
+        let archive_path = self
+            .fetch(asset, variant, version, downloader, progress)
+            .await?;
+        self.install_archive(
+            &archive_path,
+            variant,
+            version,
+            asset.checksum.as_ref(),
+            &AtomicBool::new(false),
+        )
     }
 }
 
@@ -237,6 +296,16 @@ fn to_hex(bytes: &[u8]) -> String {
 /// Unix mode bits are preserved so the engine binary stays runnable. Godot
 /// archives do not contain symlinks, so they are not handled.
 pub fn extract_zip(zip_path: &Path, dest_dir: &Path) -> Result<(), InstallError> {
+    extract_zip_cancelable(zip_path, dest_dir, &AtomicBool::new(false))
+}
+
+/// Extract a zip, checking the cancelled flag between entries so a long extract
+/// can be stopped. The caller cleans up the destination on a cancel.
+fn extract_zip_cancelable(
+    zip_path: &Path,
+    dest_dir: &Path,
+    cancelled: &AtomicBool,
+) -> Result<(), InstallError> {
     let file = File::open(zip_path)?;
     let mut archive =
         zip::ZipArchive::new(file).map_err(|err| InstallError::Extract(err.to_string()))?;
@@ -257,6 +326,9 @@ pub fn extract_zip(zip_path: &Path, dest_dir: &Path) -> Result<(), InstallError>
 
     fs::create_dir_all(dest_dir)?;
     for index in 0..archive.len() {
+        if cancelled.load(Ordering::Relaxed) {
+            return Err(InstallError::Cancelled);
+        }
         let mut entry = archive
             .by_index(index)
             .map_err(|err| InstallError::Extract(err.to_string()))?;
@@ -365,6 +437,8 @@ pub enum InstallError {
     Extract(String),
     /// A zip entry had an unsafe path.
     UnsafePath(String),
+    /// The install was cancelled by the user.
+    Cancelled,
     /// The engine executable could not be found.
     Executable(PlatformError),
 }
@@ -386,6 +460,7 @@ impl std::fmt::Display for InstallError {
             }
             InstallError::Extract(msg) => write!(f, "could not extract archive: {msg}"),
             InstallError::UnsafePath(name) => write!(f, "archive has an unsafe path: {name}"),
+            InstallError::Cancelled => write!(f, "the install was cancelled"),
             InstallError::Executable(err) => write!(f, "{err}"),
         }
     }
@@ -504,24 +579,29 @@ mod tests {
     }
 
     /// A progress sink that records the calls it received, to check forwarding.
+    /// It uses atomics so it stays Send and Sync, which the trait now requires.
     #[derive(Default)]
     struct RecordingProgress {
-        started: std::cell::Cell<bool>,
-        total: std::cell::Cell<Option<u64>>,
-        last: std::cell::Cell<u64>,
-        finished: std::cell::Cell<bool>,
+        started: std::sync::atomic::AtomicBool,
+        total: std::sync::atomic::AtomicU64,
+        last: std::sync::atomic::AtomicU64,
+        finished: std::sync::atomic::AtomicBool,
     }
 
     impl DownloadProgress for RecordingProgress {
         fn start(&self, total: Option<u64>) {
-            self.started.set(true);
-            self.total.set(total);
+            self.started
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            self.total
+                .store(total.unwrap_or(0), std::sync::atomic::Ordering::SeqCst);
         }
         fn update(&self, downloaded: u64) {
-            self.last.set(downloaded);
+            self.last
+                .store(downloaded, std::sync::atomic::Ordering::SeqCst);
         }
         fn finish(&self) {
-            self.finished.set(true);
+            self.finished
+                .store(true, std::sync::atomic::Ordering::SeqCst);
         }
     }
 
@@ -827,10 +907,11 @@ mod tests {
         let version = stable(4, 3, 0);
         block_on(manager.install(&asset, Variant::Standard, version, &downloader, &progress))
             .unwrap();
-        assert!(progress.started.get());
-        assert_eq!(progress.total.get(), Some(total));
-        assert_eq!(progress.last.get(), total);
-        assert!(progress.finished.get());
+        use std::sync::atomic::Ordering::SeqCst;
+        assert!(progress.started.load(SeqCst));
+        assert_eq!(progress.total.load(SeqCst), total);
+        assert_eq!(progress.last.load(SeqCst), total);
+        assert!(progress.finished.load(SeqCst));
     }
 
     #[test]

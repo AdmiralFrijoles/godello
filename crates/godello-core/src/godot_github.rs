@@ -108,12 +108,16 @@ struct ManifestEntry {
     name: String,
     flavor: String,
     #[serde(default)]
+    release_date: Option<String>,
+    #[serde(default)]
     releases: Vec<ManifestRelease>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ManifestRelease {
     name: String,
+    #[serde(default)]
+    release_date: Option<String>,
 }
 
 /// Turn the versions.yml text into releases. Each top entry gives one tag from
@@ -127,21 +131,29 @@ pub fn parse_manifest(yaml: &str) -> Result<Vec<Release>, RepositoryError> {
     let mut seen = std::collections::HashSet::new();
     let mut releases = Vec::new();
     for entry in entries {
-        let mut tags = Vec::with_capacity(entry.releases.len() + 1);
-        tags.push(format!("{}-{}", entry.name, entry.flavor));
+        // Pair each tag with its own date. The top entry is the stable build and
+        // each nested release is one prerelease, and they each carry a date.
+        let mut tagged = Vec::with_capacity(entry.releases.len() + 1);
+        tagged.push((
+            format!("{}-{}", entry.name, entry.flavor),
+            entry.release_date.clone(),
+        ));
         for release in &entry.releases {
-            tags.push(format!("{}-{}", entry.name, release.name));
+            tagged.push((
+                format!("{}-{}", entry.name, release.name),
+                release.release_date.clone(),
+            ));
         }
-        for tag in tags {
+        for (tag, date) in tagged {
             if let Ok(version) = GodotVersion::parse_tag(&tag) {
                 if seen.insert(version) {
                     // The manifest does not say which flavors exist, so both are
                     // offered here. The asset lookup is the real check and will
                     // report when a build is missing.
-                    releases.push(Release::new(
-                        version,
-                        vec![Variant::Standard, Variant::Mono],
-                    ));
+                    releases.push(
+                        Release::new(version, vec![Variant::Standard, Variant::Mono])
+                            .with_date(date),
+                    );
                 }
             }
         }
@@ -398,6 +410,27 @@ mod tests {
     - name: "beta17"
     - name: "alpha1"
 "#;
+
+    #[test]
+    fn manifest_reads_release_dates_when_present() {
+        let releases = parse_manifest(SAMPLE_MANIFEST).unwrap();
+        let stable = releases
+            .iter()
+            .find(|release| release.version.to_tag() == "4.3-stable")
+            .unwrap();
+        assert_eq!(stable.release_date.as_deref(), Some("15 August 2024"));
+        let rc = releases
+            .iter()
+            .find(|release| release.version.to_tag() == "4.3-rc1")
+            .unwrap();
+        assert_eq!(rc.release_date.as_deref(), Some("1 August 2024"));
+        // An entry with no date in the manifest keeps the date as None.
+        let no_date = releases
+            .iter()
+            .find(|release| release.version.to_tag() == "4.2.2-stable")
+            .unwrap();
+        assert_eq!(no_date.release_date, None);
+    }
 
     #[test]
     fn manifest_expands_flavor_and_prereleases() {

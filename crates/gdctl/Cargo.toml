@@ -16,9 +16,14 @@ path = "src/main.rs"
 godello-core = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
+iced = { workspace = true }
+iced_aw = { workspace = true }
 indicatif = { workspace = true }
 reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true }
+tokio-stream = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

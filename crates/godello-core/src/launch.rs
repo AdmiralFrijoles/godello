@@ -17,6 +17,7 @@ use std::process::Command;
 use crate::Settings;
 use crate::csharp::{self, CsharpError};
 use crate::install::{InstallError, InstallManager};
+use crate::platform::{Os, current_os};
 use crate::process::CommandRunner;
 use crate::project::GodotProject;
 use crate::version::{GodotVersion, Variant, VersionPattern};
@@ -154,6 +155,23 @@ pub fn open_version(
     let editor = manager.executable(variant, version, false)?;
     let args = vec![OsString::from("--project-manager")];
     launcher.launch(editor.as_os_str(), &args, detached)
+}
+
+/// The system program that opens a path in the file manager, per host.
+pub fn file_manager_program(os: Os) -> &'static str {
+    match os {
+        Os::Linux => "xdg-open",
+        Os::Mac => "open",
+        Os::Windows => "explorer",
+    }
+}
+
+/// Open a path in the system file manager. Used to reveal an install on disk. It
+/// always runs detached, since the file manager is its own window.
+pub fn open_path(path: &Path, launcher: &impl Launcher) -> Result<(), LaunchError> {
+    let program = file_manager_program(current_os());
+    let args = vec![path.as_os_str().to_os_string()];
+    launcher.launch(OsStr::new(program), &args, true)
 }
 
 /// Build the C# solution when the project needs it and the setting is on. The
@@ -588,5 +606,25 @@ mod tests {
         assert_eq!(launcher.count(), 0);
         // The before launch hook must not fire when the build failed.
         assert!(!*hook_ran.borrow());
+    }
+
+    #[test]
+    fn file_manager_program_matches_the_host() {
+        assert_eq!(file_manager_program(Os::Linux), "xdg-open");
+        assert_eq!(file_manager_program(Os::Mac), "open");
+        assert_eq!(file_manager_program(Os::Windows), "explorer");
+    }
+
+    #[test]
+    fn open_path_launches_the_file_manager_detached_with_the_path() {
+        let launcher = FakeLauncher::new();
+        let path = Path::new("/tmp/godello/engines/standard/4.3-stable");
+        open_path(path, &launcher).unwrap();
+        let (program, args, detached) = launcher.last();
+        // The program is the host file manager, the one argument is the path, and
+        // it always runs detached.
+        assert_eq!(program, OsString::from(file_manager_program(current_os())));
+        assert_eq!(args, vec![path.as_os_str().to_os_string()]);
+        assert!(detached);
     }
 }

@@ -11,21 +11,36 @@
 
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 use crate::platform::Target;
 use crate::version::{GodotVersion, Variant, VersionPattern};
 
 /// One Godot release as seen by a repository. It carries the version and the
 /// build flavors that release offers. Which exact file to download for a host is
 /// resolved separately as an asset.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Release {
     pub version: GodotVersion,
     pub variants: Vec<Variant>,
+    /// The release date as the manifest wrote it, when known. It is a free form
+    /// string like "15 August 2024", not a parsed date, since it is only shown.
+    pub release_date: Option<String>,
 }
 
 impl Release {
     pub fn new(version: GodotVersion, variants: Vec<Variant>) -> Self {
-        Release { version, variants }
+        Release {
+            version,
+            variants,
+            release_date: None,
+        }
+    }
+
+    /// Attach a release date, returning the release for chaining.
+    pub fn with_date(mut self, date: Option<String>) -> Self {
+        self.release_date = date;
+        self
     }
 
     /// True when this release offers the given build flavor.

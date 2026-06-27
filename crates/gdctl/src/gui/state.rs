@@ -1,0 +1,226 @@
+//! The GUI application state.
+//!
+//! This holds the shared context reused from the CLI plus the cached data each
+//! screen renders. It is the state type the GUI framework owns and threads
+//! through update and view.
+
+use godello_core::{GodotVersion, InstalledEngine, Release, Variant};
+use iced::Theme;
+use iced::task::Handle;
+
+use crate::context::Context;
+use crate::gui::theme;
+
+/// Which top level screen is showing. Engines is the landing screen. Projects is
+/// a placeholder until a later pass. Settings holds the theme picker for now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Screen {
+    Engines,
+    Projects,
+    Settings,
+}
+
+/// Which list the engines screen is showing, the engines on disk or the ones
+/// available to install.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnginesTab {
+    Installed,
+    Available,
+}
+
+/// Which release channel the available list is showing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Channel {
+    Released,
+    Prerelease,
+}
+
+/// The kind of a toast, which sets its color.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToastKind {
+    Info,
+    Error,
+}
+
+/// A short message that floats at the bottom of the window for a while, then
+/// fades on its own. It does not push content around.
+#[derive(Debug, Clone)]
+pub struct Toast {
+    pub id: u64,
+    pub kind: ToastKind,
+    pub message: String,
+    /// Seconds left before it dismisses itself.
+    pub remaining: f32,
+    /// The starting time, so the view can show how much is left as a fraction.
+    pub total: f32,
+}
+
+impl Toast {
+    /// How much time is left, from 1.0 when fresh down to 0.0 when it expires.
+    pub fn fraction(&self) -> f32 {
+        if self.total > 0.0 {
+            (self.remaining / self.total).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+}
+
+/// The state of something loaded from disk or the network. The view renders a
+/// hint, a spinner stand in, an error, or the data, without extra flags.
+#[derive(Debug, Clone, Default)]
+pub enum Load<T> {
+    #[default]
+    Idle,
+    Loading,
+    Loaded(T),
+    Failed(String),
+}
+
+/// One install in flight. Progress fills in as the download reports bytes. The
+/// abort handle lets the user cancel it.
+#[derive(Debug, Clone)]
+pub struct InstallJob {
+    pub variant: Variant,
+    pub version: GodotVersion,
+    /// The total size once the server reports it, or None while unknown.
+    pub total: Option<u64>,
+    /// Bytes downloaded so far.
+    pub downloaded: u64,
+    /// True once the download finished and the install (verify and extract) is
+    /// running. That phase has no progress, so the view shows it as busy.
+    pub installing: bool,
+    /// Aborts the async work (the download) when the user cancels.
+    pub abort: Handle,
+    /// Asks the blocking extract to stop. The download is stopped by the abort
+    /// handle, but the extract runs off the executor and watches this flag.
+    pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl InstallJob {
+    /// The download fraction from 0.0 to 1.0, or None while the total is unknown.
+    pub fn fraction(&self) -> Option<f32> {
+        match self.total {
+            Some(total) if total > 0 => Some(self.downloaded as f32 / total as f32),
+            _ => None,
+        }
+    }
+}
+
+/// The whole GUI state.
+pub struct App {
+    /// Shared wiring reused from the CLI: paths, settings, and the network client.
+    pub ctx: Context,
+    pub screen: Screen,
+    pub theme: Theme,
+
+    /// Toasts floating at the bottom of the window, newest last.
+    pub toasts: Vec<Toast>,
+    /// The id for the next toast.
+    pub next_toast_id: u64,
+    /// True while the pointer is over a toast, which pauses the auto dismiss.
+    pub toast_paused: bool,
+
+    /// Engines found on disk.
+    pub installed: Load<Vec<InstalledEngine>>,
+    /// Versions available to install.
+    pub remote: Load<Vec<Release>>,
+    /// Which engines list is showing.
+    pub engines_tab: EnginesTab,
+    /// Which release channel the available list shows.
+    pub channel: Channel,
+    /// The filter typed into the engines search box.
+    pub filter: String,
+    /// The installed engine whose row menu is open, if any.
+    pub menu_open: Option<(Variant, GodotVersion)>,
+    /// The installed engine waiting on a remove confirmation, if any.
+    pub confirm_remove: Option<(Variant, GodotVersion)>,
+
+    /// Installs in flight, usually zero or one.
+    pub jobs: Vec<InstallJob>,
+}
+
+impl App {
+    /// Build the starting state from the shared context. The theme starts dark
+    /// and the available list opens on the released channel.
+    pub fn new(ctx: Context) -> Self {
+        App {
+            ctx,
+            screen: Screen::Engines,
+            theme: theme::dark(),
+            toasts: Vec::new(),
+            next_toast_id: 0,
+            toast_paused: false,
+            installed: Load::Idle,
+            remote: Load::Idle,
+            engines_tab: EnginesTab::Installed,
+            channel: Channel::Released,
+            filter: String::new(),
+            menu_open: None,
+            confirm_remove: None,
+            jobs: Vec::new(),
+        }
+    }
+
+    /// Find the in flight job for a version and variant, if any.
+    pub fn job_mut(&mut self, variant: Variant, version: GodotVersion) -> Option<&mut InstallJob> {
+        self.jobs
+            .iter_mut()
+            .find(|job| job.variant == variant && job.version == version)
+    }
+
+    /// Read the in flight job for a version and variant, if any.
+    pub fn job(&self, variant: Variant, version: GodotVersion) -> Option<&InstallJob> {
+        self.jobs
+            .iter()
+            .find(|job| job.variant == variant && job.version == version)
+    }
+
+    /// True when a version and variant has an install in flight.
+    pub fn is_installing(&self, variant: Variant, version: GodotVersion) -> bool {
+        self.job(variant, version).is_some()
+    }
+
+    /// True when a version and variant is already installed.
+    pub fn is_installed(&self, variant: Variant, version: GodotVersion) -> bool {
+        match &self.installed {
+            Load::Loaded(engines) => engines
+                .iter()
+                .any(|engine| engine.variant == variant && engine.version == version),
+            _ => false,
+        }
+    }
+
+    /// Show a toast. An error stays a little longer than an info.
+    pub fn toast(&mut self, kind: ToastKind, message: impl Into<String>) {
+        let remaining = match kind {
+            ToastKind::Info => 4.0,
+            ToastKind::Error => 7.0,
+        };
+        self.toasts.push(Toast {
+            id: self.next_toast_id,
+            kind,
+            message: message.into(),
+            remaining,
+            total: remaining,
+        });
+        self.next_toast_id += 1;
+    }
+
+    /// Remove a toast by id, for a click to dismiss.
+    pub fn dismiss_toast(&mut self, id: u64) {
+        self.toasts.retain(|toast| toast.id != id);
+    }
+
+    /// Age the toasts by the elapsed seconds and drop any that have run out. The
+    /// aging pauses while the pointer is over a toast.
+    pub fn tick_toasts(&mut self, elapsed: f32) {
+        if self.toast_paused {
+            return;
+        }
+        for toast in &mut self.toasts {
+            toast.remaining -= elapsed;
+        }
+        self.toasts.retain(|toast| toast.remaining > 0.0);
+    }
+}

@@ -14,6 +14,11 @@ use crate::net::WebClient;
 pub type Repository = GodotGitHubRepository<WebClient>;
 
 /// Everything a command needs that is resolved once at startup.
+///
+/// This is cheap to clone. The settings and paths are small and the network
+/// client shares one connection pool across clones, so the GUI can hand a copy
+/// to its startup hook without rebuilding anything.
+#[derive(Clone)]
 pub struct Context {
     pub paths: Paths,
     pub settings: Settings,

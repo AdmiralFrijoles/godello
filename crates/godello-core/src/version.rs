@@ -59,7 +59,7 @@ impl FromStr for Variant {
 
 /// The release stage of a version. Ordered from least to most stable as alpha,
 /// dev, beta, rc, then stable. Within a stage the higher number is newer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Stage {
     Alpha(u32),
     Dev(u32),
@@ -142,7 +142,7 @@ impl FromStr for Stage {
 }
 
 /// A fully known Godot version, parsed from a real release tag.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GodotVersion {
     pub major: u32,
     pub minor: u32,
