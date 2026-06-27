@@ -182,7 +182,7 @@ fn parse(content: &str) -> Parsed {
             (Some("application"), "config/features") => {
                 parsed.features = parse_packed_string_array(value);
             }
-            (Some("godello"), "version") => {
+            (Some("godello"), "pin_version") => {
                 parsed.pinned_version = unquote(value).parse().ok();
             }
             _ => {}
@@ -228,7 +228,7 @@ fn parse_packed_string_array(value: &str) -> Vec<String> {
 /// Produce the new file body with the pin written into the godello section.
 fn write_pin(content: &str, pattern: VersionPattern) -> String {
     let mut lines: Vec<String> = content.lines().map(|line| line.to_string()).collect();
-    let version_line = format!("version=\"{pattern}\"");
+    let pin_line = format!("pin_version=\"{pattern}\"");
 
     let header = lines
         .iter()
@@ -246,12 +246,12 @@ fn write_pin(content: &str, pattern: VersionPattern) -> String {
                 lines[index]
                     .trim()
                     .split_once('=')
-                    .map(|(key, _)| key.trim() == "version")
+                    .map(|(key, _)| key.trim() == "pin_version")
                     .unwrap_or(false)
             });
             match existing {
-                Some(index) => lines[index] = version_line,
-                None => lines.insert(start + 1, version_line),
+                Some(index) => lines[index] = pin_line,
+                None => lines.insert(start + 1, pin_line),
             }
         }
         None => {
@@ -259,7 +259,7 @@ fn write_pin(content: &str, pattern: VersionPattern) -> String {
                 lines.push(String::new());
             }
             lines.push("[godello]".to_string());
-            lines.push(version_line);
+            lines.push(pin_line);
         }
     }
 
@@ -463,7 +463,7 @@ run/main_scene="res://main.tscn"
         let dir = scratch("req-pin");
         write_project(
             &dir,
-            "config_version=5\n[application]\nconfig/features=PackedStringArray(\"4.3\")\n[godello]\nversion=\"4.2-stable\"\n",
+            "config_version=5\n[application]\nconfig/features=PackedStringArray(\"4.3\")\n[godello]\npin_version=\"4.2-stable\"\n",
         );
         let project = GodotProject::load(&dir).unwrap();
         let (pattern, variant) = project.required_engine().unwrap();
@@ -521,13 +521,13 @@ run/main_scene="res://main.tscn"
         let dir = scratch("pin-update");
         write_project(
             &dir,
-            "config_version=5\n[godello]\nversion=\"4.1-stable\"\n",
+            "config_version=5\n[godello]\npin_version=\"4.1-stable\"\n",
         );
         GodotProject::set_pin(&dir, "4.4-stable".parse().unwrap()).unwrap();
         let body = fs::read_to_string(GodotProject::project_file(&dir)).unwrap();
-        // Count the quoted pin form so config_version is not also matched.
-        assert_eq!(body.matches("version=\"").count(), 1);
-        assert!(body.contains("version=\"4.4-stable\""));
+        // Only one pin line, so an update did not leave the old value behind.
+        assert_eq!(body.matches("pin_version=\"").count(), 1);
+        assert!(body.contains("pin_version=\"4.4-stable\""));
         assert!(!body.contains("4.1-stable"));
     }
 

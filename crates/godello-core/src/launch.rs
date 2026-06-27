@@ -349,7 +349,10 @@ mod tests {
         install_engine(&root, Variant::Standard, stable(4, 2, 0));
         let manager = InstallManager::new(&root, root.join("dl"));
         let proj_dir = scratch("resolve-pin-proj");
-        let project = write_project(&proj_dir, "config_version=5\n[godello]\nversion=\"4.3\"\n");
+        let project = write_project(
+            &proj_dir,
+            "config_version=5\n[godello]\npin_version=\"4.3\"\n",
+        );
         let (version, variant) = engine_for_project(&manager, &project).unwrap();
         assert_eq!(version, stable(4, 3, 1));
         assert_eq!(variant, Variant::Standard);
@@ -392,7 +395,10 @@ mod tests {
         let root = scratch("resolve-missing");
         let manager = InstallManager::new(&root, root.join("dl"));
         let proj_dir = scratch("resolve-missing-proj");
-        let project = write_project(&proj_dir, "config_version=5\n[godello]\nversion=\"4.3\"\n");
+        let project = write_project(
+            &proj_dir,
+            "config_version=5\n[godello]\npin_version=\"4.3\"\n",
+        );
         match engine_for_project(&manager, &project) {
             Err(LaunchError::NotInstalled { pattern, variant }) => {
                 assert_eq!(pattern, Some("4.3".parse().unwrap()));
