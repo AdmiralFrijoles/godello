@@ -94,12 +94,16 @@ pub enum Command {
         /// Skip building the C# solution even when that setting is on.
         #[arg(long = "no-build")]
         no_build: bool,
+        #[command(flatten)]
+        detach: DetachArg,
     },
     /// Open the editor for the project in the current folder.
     Edit {
         /// Skip building the C# solution even when that setting is on.
         #[arg(long = "no-build")]
         no_build: bool,
+        #[command(flatten)]
+        detach: DetachArg,
     },
     /// Read or change a setting.
     Settings {
@@ -127,6 +131,8 @@ pub enum ProjectCommand {
         /// Skip building the C# solution even when that setting is on.
         #[arg(long = "no-build")]
         no_build: bool,
+        #[command(flatten)]
+        detach: DetachArg,
     },
     /// Run a project without the editor.
     Run {
@@ -134,6 +140,8 @@ pub enum ProjectCommand {
         /// Skip building the C# solution even when that setting is on.
         #[arg(long = "no-build")]
         no_build: bool,
+        #[command(flatten)]
+        detach: DetachArg,
     },
     /// Forget a project.
     Remove { path: PathBuf },
@@ -178,6 +186,31 @@ impl VariantArg {
             Some(Variant::Mono)
         } else {
             self.variant
+        }
+    }
+}
+
+/// A per launch override of the detached setting. At most one of the two may be
+/// given. Neither means use the configured default.
+#[derive(Debug, Args)]
+pub struct DetachArg {
+    /// Launch detached so the command returns right away.
+    #[arg(short = 'd', long = "detached")]
+    detached: bool,
+    /// Stay attached and wait for the editor to close.
+    #[arg(short = 'a', long = "attached", conflicts_with = "detached")]
+    attached: bool,
+}
+
+impl DetachArg {
+    /// The chosen detached value, or None to use the configured default.
+    pub fn selected(&self) -> Option<bool> {
+        if self.detached {
+            Some(true)
+        } else if self.attached {
+            Some(false)
+        } else {
+            None
         }
     }
 }
@@ -391,11 +424,17 @@ mod tests {
     fn run_and_edit_take_no_path() {
         assert!(matches!(
             parse(&["gdctl", "run"]).command,
-            Some(Command::Run { no_build: false })
+            Some(Command::Run {
+                no_build: false,
+                ..
+            })
         ));
         assert!(matches!(
             parse(&["gdctl", "edit"]).command,
-            Some(Command::Edit { no_build: false })
+            Some(Command::Edit {
+                no_build: false,
+                ..
+            })
         ));
     }
 
@@ -403,11 +442,11 @@ mod tests {
     fn run_and_edit_take_no_build() {
         assert!(matches!(
             parse(&["gdctl", "run", "--no-build"]).command,
-            Some(Command::Run { no_build: true })
+            Some(Command::Run { no_build: true, .. })
         ));
         assert!(matches!(
             parse(&["gdctl", "edit", "--no-build"]).command,
-            Some(Command::Edit { no_build: true })
+            Some(Command::Edit { no_build: true, .. })
         ));
     }
 
@@ -416,7 +455,7 @@ mod tests {
         let cli = parse(&["gdctl", "project", "edit", "/games/one", "--no-build"]);
         match cli.command.unwrap() {
             Command::Project {
-                command: ProjectCommand::Edit { path, no_build },
+                command: ProjectCommand::Edit { path, no_build, .. },
             } => {
                 assert_eq!(path, PathBuf::from("/games/one"));
                 assert!(no_build);
@@ -428,6 +467,45 @@ mod tests {
             Command::Project {
                 command: ProjectCommand::Run { no_build, .. },
             } => assert!(!no_build),
+            other => panic!("expected project run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_and_edit_take_a_detached_override() {
+        // The flags resolve to an explicit choice, and neither means default.
+        let detached = match parse(&["gdctl", "run", "--detached"]).command.unwrap() {
+            Command::Run { detach, .. } => detach.selected(),
+            other => panic!("expected run, got {other:?}"),
+        };
+        assert_eq!(detached, Some(true));
+
+        let attached = match parse(&["gdctl", "edit", "--attached"]).command.unwrap() {
+            Command::Edit { detach, .. } => detach.selected(),
+            other => panic!("expected edit, got {other:?}"),
+        };
+        assert_eq!(attached, Some(false));
+
+        let neither = match parse(&["gdctl", "run"]).command.unwrap() {
+            Command::Run { detach, .. } => detach.selected(),
+            other => panic!("expected run, got {other:?}"),
+        };
+        assert_eq!(neither, None);
+    }
+
+    #[test]
+    fn detached_and_attached_together_are_rejected() {
+        let result = Cli::try_parse_from(["gdctl", "run", "--detached", "--attached"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn project_run_takes_a_detached_override() {
+        let cli = parse(&["gdctl", "project", "run", "/games/one", "--detached"]);
+        match cli.command.unwrap() {
+            Command::Project {
+                command: ProjectCommand::Run { detach, .. },
+            } => assert_eq!(detach.selected(), Some(true)),
             other => panic!("expected project run, got {other:?}"),
         }
     }

@@ -56,6 +56,7 @@ gdctl project pin path/to/game 4.3   # write the required version into project.g
 gdctl edit                           # open the editor for the project in this folder
 gdctl edit --no-build                # skip the C# build for this launch
 gdctl run                            # run the project in this folder
+gdctl run --detached                 # launch detached and return right away (or --attached)
 gdctl project status path/to/game    # branch, sync state, local changes
 gdctl project update path/to/game    # bring it up to date with its remote
 gdctl clone https://example.com/game.git

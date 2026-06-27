@@ -46,8 +46,8 @@ pub async fn dispatch(ctx: &mut Context, command: Command) -> Result<()> {
         Command::Open { version, variant } => open(ctx, version, variant.selected()).await,
         Command::Project { command } => project(ctx, command).await,
         Command::Clone { url, dir } => clone(ctx, &url, dir).await,
-        Command::Run { no_build } => run_current(ctx, no_build).await,
-        Command::Edit { no_build } => edit_current(ctx, no_build).await,
+        Command::Run { no_build, detach } => run_current(ctx, no_build, detach.selected()).await,
+        Command::Edit { no_build, detach } => edit_current(ctx, no_build, detach.selected()).await,
         Command::Settings { command } => settings(ctx, command),
     }
 }
@@ -216,13 +216,21 @@ async fn project(ctx: &mut Context, command: ProjectCommand) -> Result<()> {
         ProjectCommand::Add { path } => project_add(ctx, &path),
         ProjectCommand::List => project_list(ctx),
         ProjectCommand::Pin { path, version } => project_pin(ctx, &path, version),
-        ProjectCommand::Edit { path, no_build } => {
+        ProjectCommand::Edit {
+            path,
+            no_build,
+            detach,
+        } => {
             let dir = existing_dir(&path)?;
-            edit_project(ctx, &dir, no_build).await
+            edit_project(ctx, &dir, no_build, detach.selected()).await
         }
-        ProjectCommand::Run { path, no_build } => {
+        ProjectCommand::Run {
+            path,
+            no_build,
+            detach,
+        } => {
             let dir = existing_dir(&path)?;
-            run_project_dir(ctx, &dir, no_build).await
+            run_project_dir(ctx, &dir, no_build, detach.selected()).await
         }
         ProjectCommand::Remove { path } => project_remove(ctx, &path),
         ProjectCommand::Status { path } => project_status(ctx, &path),
@@ -338,21 +346,26 @@ fn project_update(ctx: &Context, path: &Path, reset: bool) -> Result<()> {
 
 // Current folder shortcuts.
 
-async fn edit_current(ctx: &Context, no_build: bool) -> Result<()> {
+async fn edit_current(ctx: &Context, no_build: bool, detached: Option<bool>) -> Result<()> {
     let dir = current_project_dir()?;
-    edit_project(ctx, &dir, no_build).await
+    edit_project(ctx, &dir, no_build, detached).await
 }
 
-async fn run_current(ctx: &Context, no_build: bool) -> Result<()> {
+async fn run_current(ctx: &Context, no_build: bool, detached: Option<bool>) -> Result<()> {
     let dir = current_project_dir()?;
-    run_project_dir(ctx, &dir, no_build).await
+    run_project_dir(ctx, &dir, no_build, detached).await
 }
 
-async fn edit_project(ctx: &Context, dir: &Path, no_build: bool) -> Result<()> {
+async fn edit_project(
+    ctx: &Context,
+    dir: &Path,
+    no_build: bool,
+    detached: Option<bool>,
+) -> Result<()> {
     let project = GodotProject::load(dir)
         .with_context(|| format!("could not read the project in {}", dir.display()))?;
     ensure_project_engine(ctx, &project).await?;
-    let settings = launch_settings(&ctx.settings, no_build);
+    let settings = launch_settings(&ctx.settings, no_build, detached);
     announce_build(ctx, &settings, &project);
     let label = project.name.as_deref().unwrap_or("the project");
     // The launch message prints after any build, just before the editor starts.
@@ -368,11 +381,16 @@ async fn edit_project(ctx: &Context, dir: &Path, no_build: bool) -> Result<()> {
     Ok(())
 }
 
-async fn run_project_dir(ctx: &Context, dir: &Path, no_build: bool) -> Result<()> {
+async fn run_project_dir(
+    ctx: &Context,
+    dir: &Path,
+    no_build: bool,
+    detached: Option<bool>,
+) -> Result<()> {
     let project = GodotProject::load(dir)
         .with_context(|| format!("could not read the project in {}", dir.display()))?;
     ensure_project_engine(ctx, &project).await?;
-    let settings = launch_settings(&ctx.settings, no_build);
+    let settings = launch_settings(&ctx.settings, no_build, detached);
     announce_build(ctx, &settings, &project);
     let label = project.name.as_deref().unwrap_or("the project");
     // The launch message prints after any build, just before the project runs.
@@ -388,13 +406,17 @@ async fn run_project_dir(ctx: &Context, dir: &Path, no_build: bool) -> Result<()
     Ok(())
 }
 
-/// The settings to launch with. The no_build flag turns the C# build off for
-/// this one launch, leaving the saved setting alone. It only turns a build off,
-/// never on, so a project that does not need one is unaffected.
-fn launch_settings(base: &Settings, no_build: bool) -> Settings {
+/// The settings to launch with, after applying the per launch overrides. The
+/// no_build flag turns the C# build off for this one launch, leaving the saved
+/// setting alone, and only ever turns it off. The detached override sets whether
+/// the launch is detached when given, otherwise the saved setting stands.
+fn launch_settings(base: &Settings, no_build: bool, detached: Option<bool>) -> Settings {
     let mut settings = base.clone();
     if no_build {
         settings.build_csharp_before_launch = false;
+    }
+    if let Some(detached) = detached {
+        settings.launch_detached = detached;
     }
     settings
 }
@@ -680,17 +702,37 @@ mod tests {
             ..Settings::default()
         };
         // The flag overrides an enabled build for this launch.
-        assert!(!launch_settings(&on, true).build_csharp_before_launch);
+        assert!(!launch_settings(&on, true, None).build_csharp_before_launch);
         // Without the flag the setting is untouched.
-        assert!(launch_settings(&on, false).build_csharp_before_launch);
+        assert!(launch_settings(&on, false, None).build_csharp_before_launch);
 
         let off = Settings {
             build_csharp_before_launch: false,
             ..Settings::default()
         };
         // It never turns a build on, it only leaves it off.
-        assert!(!launch_settings(&off, true).build_csharp_before_launch);
-        assert!(!launch_settings(&off, false).build_csharp_before_launch);
+        assert!(!launch_settings(&off, true, None).build_csharp_before_launch);
+        assert!(!launch_settings(&off, false, None).build_csharp_before_launch);
+    }
+
+    #[test]
+    fn detached_override_sets_either_way_or_keeps_the_default() {
+        let attached = Settings {
+            launch_detached: false,
+            ..Settings::default()
+        };
+        // The override can force detached on or off for this launch.
+        assert!(launch_settings(&attached, false, Some(true)).launch_detached);
+        assert!(!launch_settings(&attached, false, Some(false)).launch_detached);
+        // None leaves the saved setting in place, in both directions.
+        assert!(!launch_settings(&attached, false, None).launch_detached);
+
+        let detached = Settings {
+            launch_detached: true,
+            ..Settings::default()
+        };
+        assert!(!launch_settings(&detached, false, Some(false)).launch_detached);
+        assert!(launch_settings(&detached, false, None).launch_detached);
     }
 
     #[test]

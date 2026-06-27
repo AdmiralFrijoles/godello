@@ -104,7 +104,7 @@ fn run_dotnet_build(project_dir: &Path, runner: &impl CommandRunner) -> Result<(
         OsString::from("build"),
         target.into_os_string(),
         OsString::from("--property"),
-        OsString::from("WarningLevel=0")
+        OsString::from("WarningLevel=0"),
     ];
     let outcome = runner.run(OsStr::new("dotnet"), &args, project_dir)?;
     finish(outcome)
