@@ -15,8 +15,9 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::Settings;
-use crate::csharp::{self, CommandRunner, CsharpError};
+use crate::csharp::{self, CsharpError};
 use crate::install::{InstallError, InstallManager};
+use crate::process::CommandRunner;
 use crate::project::GodotProject;
 use crate::version::{GodotVersion, Variant, VersionPattern};
 
@@ -326,9 +327,9 @@ mod tests {
             _program: &OsStr,
             _args: &[OsString],
             _cwd: &Path,
-        ) -> Result<csharp::CommandOutcome, CsharpError> {
+        ) -> Result<crate::process::CommandOutcome, crate::process::ProcessError> {
             *self.ran.borrow_mut() = true;
-            Ok(csharp::CommandOutcome {
+            Ok(crate::process::CommandOutcome {
                 success: !self.fail,
                 code: Some(if self.fail { 1 } else { 0 }),
                 stdout: String::new(),

@@ -10,14 +10,13 @@ pub mod godot_github;
 pub mod install;
 pub mod launch;
 pub mod platform;
+pub mod process;
 pub mod project;
 pub mod repository;
 pub mod version;
 
 pub use config::{ConfigError, Paths, ProjectEntry, ProjectList, Settings};
-pub use csharp::{
-    CommandRunner, CsharpBuildTool, CsharpError, SystemCommandRunner, build_solutions,
-};
+pub use csharp::{CsharpBuildTool, CsharpError, build_solutions};
 pub use godot_github::GodotGitHubRepository;
 pub use install::{Downloader, InstallError, InstallManager, InstalledEngine};
 pub use launch::{
@@ -25,6 +24,7 @@ pub use launch::{
     run_project,
 };
 pub use platform::{Arch, Os, PlatformError, Target};
+pub use process::{CommandOutcome, CommandRunner, ProcessError, SystemCommandRunner};
 pub use project::{GodotProject, ProjectError, find_project_dir};
 pub use repository::{
     Asset, Checksum, ChecksumAlgorithm, EngineRepository, HttpClient, Release, RepositoryError,

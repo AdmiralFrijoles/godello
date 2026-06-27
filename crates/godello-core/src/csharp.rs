@@ -14,10 +14,11 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+
+use crate::process::{CommandOutcome, CommandRunner, ProcessError};
 
 /// Which tool builds the C# solutions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -54,52 +55,6 @@ impl FromStr for CsharpBuildTool {
             "godot" | "editor" => Ok(CsharpBuildTool::Godot),
             "dotnet" => Ok(CsharpBuildTool::Dotnet),
             _ => Err(()),
-        }
-    }
-}
-
-/// The result of running a process.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandOutcome {
-    pub success: bool,
-    pub code: Option<i32>,
-    pub stdout: String,
-    pub stderr: String,
-}
-
-/// Runs an external program. The real runner uses the system process. Tests use
-/// a fake runner that records the call.
-pub trait CommandRunner {
-    fn run(
-        &self,
-        program: &OsStr,
-        args: &[OsString],
-        cwd: &Path,
-    ) -> Result<CommandOutcome, CsharpError>;
-}
-
-/// Runs a program with the system process.
-pub struct SystemCommandRunner;
-
-impl CommandRunner for SystemCommandRunner {
-    fn run(
-        &self,
-        program: &OsStr,
-        args: &[OsString],
-        cwd: &Path,
-    ) -> Result<CommandOutcome, CsharpError> {
-        let output = Command::new(program).args(args).current_dir(cwd).output();
-        match output {
-            Ok(output) => Ok(CommandOutcome {
-                success: output.status.success(),
-                code: output.status.code(),
-                stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            }),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                Err(CsharpError::ProgramNotFound(program.to_os_string()))
-            }
-            Err(err) => Err(CsharpError::Io(err)),
         }
     }
 }
@@ -179,25 +134,9 @@ fn finish(outcome: CommandOutcome) -> Result<(), CsharpError> {
     } else {
         Err(CsharpError::BuildFailed {
             code: outcome.code,
-            output: combined_output(&outcome),
+            output: outcome.combined(),
         })
     }
-}
-
-/// Join the captured output for an error message, preferring whichever stream
-/// has content.
-fn combined_output(outcome: &CommandOutcome) -> String {
-    let mut text = String::new();
-    if !outcome.stdout.trim().is_empty() {
-        text.push_str(outcome.stdout.trim());
-    }
-    if !outcome.stderr.trim().is_empty() {
-        if !text.is_empty() {
-            text.push('\n');
-        }
-        text.push_str(outcome.stderr.trim());
-    }
-    text
 }
 
 /// An error from building C# solutions.
@@ -209,6 +148,15 @@ pub enum CsharpError {
     Io(std::io::Error),
     /// The build ran but failed.
     BuildFailed { code: Option<i32>, output: String },
+}
+
+impl From<ProcessError> for CsharpError {
+    fn from(err: ProcessError) -> Self {
+        match err {
+            ProcessError::ProgramNotFound(program) => CsharpError::ProgramNotFound(program),
+            ProcessError::Io(err) => CsharpError::Io(err),
+        }
+    }
 }
 
 impl std::fmt::Display for CsharpError {
@@ -291,12 +239,12 @@ mod tests {
             program: &OsStr,
             args: &[OsString],
             cwd: &Path,
-        ) -> Result<CommandOutcome, CsharpError> {
+        ) -> Result<CommandOutcome, ProcessError> {
             *self.seen.borrow_mut() =
                 Some((program.to_os_string(), args.to_vec(), cwd.to_path_buf()));
             match &self.outcome {
                 Ok(outcome) => Ok(outcome.clone()),
-                Err(()) => Err(CsharpError::ProgramNotFound(program.to_os_string())),
+                Err(()) => Err(ProcessError::ProgramNotFound(program.to_os_string())),
             }
         }
     }
@@ -430,18 +378,7 @@ mod tests {
         assert!(matches!(result, Err(CsharpError::ProgramNotFound(_))));
     }
 
-    // Real runner and messages.
-
-    #[test]
-    fn system_runner_reports_a_missing_program() {
-        let runner = SystemCommandRunner;
-        let result = runner.run(
-            OsStr::new("godello-no-such-program-xyz"),
-            &[OsString::from("--version")],
-            Path::new("."),
-        );
-        assert!(matches!(result, Err(CsharpError::ProgramNotFound(_))));
-    }
+    // Messages.
 
     #[test]
     fn build_failed_message_includes_output() {
