@@ -16,6 +16,8 @@ This is the plan for building Godello. It reflects three decisions:
 - Let a project require a version. If it is missing, offer to install it.
 - For C# projects, build the solution before opening the editor. On by default,
   toggleable in settings.
+- Optional git integration per project. Show the branch and whether it is up to
+  date, bring it up to date safely, and clone a project from a repo.
 - Run on Linux, Windows, and Mac.
 
 ## Crate layout
@@ -144,6 +146,31 @@ Reads and tracks projects.
   error the caller can turn into an install prompt.
 - Run the editor detached so the CLI returns. Run mode can stay attached.
 
+### git
+
+Optional git integration for projects. It uses the system git command through the
+same command runner used for builds, so it is a clean no op when a project is not a
+git repo or when git is not installed.
+
+Status reads, all safe and read only:
+
+- Current branch. Report the checked out branch, or note a detached head.
+- Up to date check. Compare the branch to its upstream tracking branch and report
+  ahead, behind, up to date, or no upstream. An optional fetch first makes the
+  answer current.
+- Dirty check. Report whether the working tree has uncommitted changes.
+
+Changing actions:
+
+- Bring up to date. Fast forward the branch to its upstream. Abort with a clear
+  message and change nothing when the working tree is dirty or the update is not a
+  fast forward, for example on a conflict or diverged history.
+- Reset to upstream. A separate, explicit action that hard resets the branch to its
+  upstream. This loses local changes and local commits, so it always warns first
+  and is never done as part of a normal update.
+- Clone. Clone a repo url into a folder, then read its project.godot and add it as
+  a project.
+
 ### config
 
 App settings stored as toml in the app config dir. The config dir comes from the
@@ -206,6 +233,10 @@ gdctl project pin <path> <version>         write the required version pin
 gdctl project edit <path>                  open the project in its editor
 gdctl project run <path>                   run the project without the editor
 gdctl project remove <path>                forget a project
+gdctl project status <path>                show branch, ahead or behind, dirty state
+gdctl project update <path>                fast forward to upstream, abort on conflict
+gdctl project update <path> --reset        hard reset to upstream, warns, loses changes
+gdctl clone <url> [dir]                    clone a repo and add it as a project
 
 gdctl run                                  use the project.godot in the current dir
 gdctl edit                                 same, but open the editor
@@ -216,6 +247,19 @@ gdctl settings set <key> <value>
 
 When edit or run needs a version that is not installed, gdctl prints the missing
 version and asks to install it, then continues.
+
+### Non interactive mode
+
+Every command must be usable without prompts. A global option, such as --yes or
+--non-interactive, turns off all prompts so a command can run in a script or a CI
+job. This is a command option, not a setting.
+
+With the option set, a command takes the safe default for each prompt and never
+waits for input. A prompt that would install a missing version proceeds. A prompt
+that could lose data, such as a git reset, does not happen unless the action was
+asked for explicitly, for example with --reset. When a command cannot continue
+without a real choice, it fails with a clear message and a non zero exit code
+rather than waiting.
 
 The desktop app is milestone 2. Running gdctl with no command will open it once it
 exists. Until then it prints help.
@@ -236,14 +280,16 @@ To be pinned when first used.
 - directories for app paths.
 - thiserror for the core error type, anyhow in the binary.
 - indicatif for download progress in the CLI.
+- the system git command on the path for the optional git features. This is an
+  external tool, not a crate.
 
 ## Milestones
 
 Milestone 1, command line core.
 
 - version, repository with github, platform, install, project, csharp, launch,
-  config, error.
-- gdctl commands above.
+  git, config, error.
+- gdctl commands above, including the git commands and the non interactive option.
 - Tests for version parsing and matching, asset selection per target, project.godot
   parsing, and the install layout.
 
@@ -262,3 +308,6 @@ Milestone 3, polish.
 - Exact app data paths per OS once directories is wired in.
 - Whether run mode should stay attached or also detach.
 - How much of the Godot website manifest we cache versus query live.
+- Git via the system git command versus a bundled library such as git2. System git
+  is simpler but requires git on the path. To be confirmed before building the git
+  module.
