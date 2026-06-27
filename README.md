@@ -6,8 +6,10 @@ projects pinned to the version they need. Works on Linux, Windows, and Mac.
 Godello runs as a single binary named gdctl. Use it from the command line for
 everything, or run it with no subcommand to open the desktop app.
 
-Status: the command line core works. The desktop app has started. It can list,
-install, and remove engines today. The projects and settings screens are next.
+Status: the command line core works. The desktop app has an engines screen
+(install, remove, open), a projects screen (add, clone, edit, run, pin, git
+status and update), and a settings screen with a theme picker. A full settings
+form is next.
 
 ## Features
 

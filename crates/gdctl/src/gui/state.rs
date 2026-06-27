@@ -4,7 +4,13 @@
 //! screen renders. It is the state type the GUI framework owns and threads
 //! through update and view.
 
-use godello_core::{GodotVersion, InstalledEngine, Release, Variant};
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use godello_core::{
+    GodotProject, GodotVersion, InstalledEngine, ProjectEntry, Release, RepoStatus, Variant,
+    VersionPattern,
+};
 use iced::Theme;
 use iced::task::Handle;
 
@@ -138,6 +144,70 @@ pub struct App {
 
     /// Installs in flight, usually zero or one.
     pub jobs: Vec<InstallJob>,
+
+    /// The added projects.
+    pub projects: Load<Vec<ProjectEntry>>,
+    /// The parsed project.godot per project, for the row badges. Loaded with the
+    /// list. A project missing from here failed to load.
+    pub project_info: HashMap<PathBuf, GodotProject>,
+    /// The project whose row menu is open, if any.
+    pub project_menu_open: Option<PathBuf>,
+    /// The version control status per project, filled in as it loads.
+    pub git_status: HashMap<PathBuf, RepoStatus>,
+    /// The open pin editor, if any.
+    pub pin_editor: Option<PinEditor>,
+    /// A raised offer to install the engine a launch needs, if any.
+    pub install_offer: Option<InstallOffer>,
+    /// The open clone dialog, if any.
+    pub clone_dialog: Option<CloneDialog>,
+    /// A launch to resume once an offered install finishes.
+    pub pending_launch: Option<PendingLaunch>,
+}
+
+/// One option in the pin dropdown: a version to pin and how to label it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinChoice {
+    pub pattern: VersionPattern,
+    pub label: String,
+}
+
+impl std::fmt::Display for PinChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
+/// The editor for a project's pinned engine version. It offers the installed
+/// versions to choose from, with the project's detected version suggested.
+#[derive(Debug, Clone)]
+pub struct PinEditor {
+    pub dir: PathBuf,
+    pub choices: Vec<PinChoice>,
+    pub selected: Option<PinChoice>,
+}
+
+/// An offer to install the engine a launch needs, carrying enough to resume the
+/// launch once the install finishes.
+#[derive(Debug, Clone)]
+pub struct InstallOffer {
+    pub variant: Variant,
+    pub version: GodotVersion,
+    pub label: String,
+    pub dir: PathBuf,
+    pub run: bool,
+}
+
+/// The clone a repository dialog.
+#[derive(Debug, Clone, Default)]
+pub struct CloneDialog {
+    pub url: String,
+}
+
+/// A launch waiting on an install to finish.
+#[derive(Debug, Clone)]
+pub struct PendingLaunch {
+    pub dir: PathBuf,
+    pub run: bool,
 }
 
 impl App {
@@ -146,7 +216,7 @@ impl App {
     pub fn new(ctx: Context) -> Self {
         App {
             ctx,
-            screen: Screen::Engines,
+            screen: Screen::Projects,
             theme: theme::dark(),
             toasts: Vec::new(),
             next_toast_id: 0,
@@ -159,6 +229,14 @@ impl App {
             menu_open: None,
             confirm_remove: None,
             jobs: Vec::new(),
+            projects: Load::Idle,
+            project_info: HashMap::new(),
+            project_menu_open: None,
+            git_status: HashMap::new(),
+            pin_editor: None,
+            install_offer: None,
+            clone_dialog: None,
+            pending_launch: None,
         }
     }
 

@@ -5,11 +5,13 @@
 //! errors are not Clone and an iced message must be Clone. We map the error to a
 //! string at the task boundary.
 
-use godello_core::{GodotVersion, Release, Variant};
+use std::path::PathBuf;
+
+use godello_core::{GodotVersion, ProjectEntry, Release, RepoStatus, UpdateOutcome, Variant};
 use iced::Theme;
 
 use crate::gui::progress::ProgressEvent;
-use crate::gui::state::{Channel, EnginesTab, Screen};
+use crate::gui::state::{Channel, EnginesTab, PinChoice, Screen};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -99,4 +101,75 @@ pub enum Message {
         version: GodotVersion,
         result: Result<(), String>,
     },
+
+    // Projects.
+    /// Open the native folder picker to add a project.
+    AddProject,
+    /// The folder picker returned, with the chosen folder or nothing.
+    ProjectFolderPicked(Option<PathBuf>),
+    /// Forget a project, removing it from the list but not from disk.
+    RemoveProject(PathBuf),
+    /// Open a project folder in the file manager.
+    OpenProjectFolder(PathBuf),
+    /// Open or close the row menu for a project.
+    ToggleProjectMenu(PathBuf),
+    /// Close any open project row menu.
+    CloseProjectMenu,
+    /// Open the editor (run false) or run the project (run true).
+    LaunchProject { dir: PathBuf, run: bool },
+    /// A launch finished, with success or an error.
+    LaunchFinished(Result<(), String>),
+    /// The resolve for an offered install finished. On success it raises the
+    /// install offer dialog, carrying the launch to resume.
+    OfferResolved {
+        dir: PathBuf,
+        run: bool,
+        variant: Variant,
+        result: Result<GodotVersion, String>,
+    },
+    /// Accept the offered install.
+    AcceptOffer,
+    /// Dismiss the offered install.
+    DismissOffer,
+
+    // Pinning.
+    /// Open the pin editor for a project.
+    OpenPinEditor(PathBuf),
+    /// Choose a version in the pin dropdown.
+    PinSelected(PinChoice),
+    /// Save the pin.
+    SavePin,
+    /// Close the pin editor without saving.
+    CancelPin,
+
+    // Version control.
+    /// Re check the status of every project. Fired on a timer so local changes
+    /// show up without the user doing anything.
+    RefreshGitStatuses,
+    /// The git status of a project loaded.
+    GitStatusLoaded {
+        dir: PathBuf,
+        status: Option<RepoStatus>,
+    },
+    /// Bring a project up to date with its remote.
+    UpdateProject(PathBuf),
+    /// A project update finished.
+    ProjectUpdated {
+        dir: PathBuf,
+        result: Result<UpdateOutcome, String>,
+    },
+
+    // Cloning.
+    /// Open the clone dialog.
+    OpenCloneDialog,
+    /// Type into the clone url field.
+    CloneUrlChanged(String),
+    /// Dismiss the clone dialog.
+    CancelClone,
+    /// Pick a destination folder and clone into it.
+    StartClone,
+    /// The destination folder was picked for a clone.
+    CloneDestinationPicked { url: String, dest: Option<PathBuf> },
+    /// A clone finished, with the added project entry or an error.
+    Cloned(Result<Option<ProjectEntry>, String>),
 }

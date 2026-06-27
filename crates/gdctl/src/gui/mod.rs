@@ -4,9 +4,9 @@
 //! logic of its own beyond presentation. Every real action calls into the core
 //! through the shared context.
 //!
-//! The window is a left navigation sidebar, a content area that uses a list and
-//! detail split, and a footer status bar. Pass one ships the engines screen and
-//! a theme picker. Projects and a full settings form come in later passes.
+//! The window is a left navigation sidebar and a content area. There is an
+//! engines screen, a projects screen, and a settings screen with a theme picker
+//! and a cache control. A full settings form comes later.
 
 mod cache;
 mod icons;
@@ -19,21 +19,32 @@ mod tasks;
 mod theme;
 mod widgets;
 
+use std::path::Path;
 use std::time::Duration;
 
 use iced::widget::{
-    button, center, column, container, mouse_area, opaque, progress_bar, row, space, stack, text,
+    button, center, column, container, mouse_area, opaque, pick_list, progress_bar, row, space,
+    stack, text, text_input,
 };
 use iced::{Alignment, Color, Element, Length, Size, Subscription, Task, Theme};
 
-use godello_core::{SystemLauncher, open_path, open_version};
+use godello_core::{
+    BlockReason, GodotProject, GodotVersion, LaunchError, ProjectList, SystemLauncher,
+    UpdateOutcome, Variant, VersionPattern, engine_for_project, open_path, open_version,
+};
 
 pub use message::Message;
-use state::{App, EnginesTab, Load, Screen, Toast, ToastKind};
+use state::{
+    App, CloneDialog, EnginesTab, InstallOffer, Load, PendingLaunch, PinChoice, PinEditor, Screen,
+    Toast, ToastKind,
+};
 
 /// How often the toast timer ticks. About sixty times a second, so the countdown
 /// bar moves smoothly rather than in visible steps.
 const TOAST_TICK: Duration = Duration::from_millis(16);
+/// How often the projects screen rechecks version control status, so local
+/// changes show without the user asking.
+const VCS_REFRESH: Duration = Duration::from_secs(10);
 
 /// Open the desktop app and run until the window closes.
 ///
@@ -42,7 +53,17 @@ const TOAST_TICK: Duration = Duration::from_millis(16);
 /// load of installed engines.
 pub fn launch(ctx: crate::context::Context) -> iced::Result {
     iced::application(
-        move || (App::new(ctx.clone()), Task::done(Message::RefreshInstalled)),
+        move || {
+            (
+                App::new(ctx.clone()),
+                // Load the installed engines, and the projects for the landing
+                // screen. Navigate to Projects triggers its first load.
+                Task::batch([
+                    Task::done(Message::RefreshInstalled),
+                    Task::done(Message::Navigate(Screen::Projects)),
+                ]),
+            )
+        },
         update,
         view,
     )
@@ -57,13 +78,17 @@ pub fn launch(ctx: crate::context::Context) -> iced::Result {
     .run()
 }
 
-/// Tick the toast timer only while there are toasts to age.
+/// The timers the app needs: the toast countdown while toasts are showing, and a
+/// periodic version control recheck while the projects screen is open.
 fn subscription(state: &App) -> Subscription<Message> {
-    if state.toasts.is_empty() {
-        Subscription::none()
-    } else {
-        iced::time::every(TOAST_TICK).map(|_| Message::ToastTick)
+    let mut subs = Vec::new();
+    if !state.toasts.is_empty() {
+        subs.push(iced::time::every(TOAST_TICK).map(|_| Message::ToastTick));
     }
+    if state.screen == Screen::Projects && matches!(state.projects, Load::Loaded(_)) {
+        subs.push(iced::time::every(VCS_REFRESH).map(|_| Message::RefreshGitStatuses));
+    }
+    Subscription::batch(subs)
 }
 
 /// Apply a message to the state and return any follow up work.
@@ -72,12 +97,16 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
         Message::Navigate(screen) => {
             state.screen = screen;
             state.menu_open = None;
-            // Load the available list the first time it is needed.
+            state.project_menu_open = None;
+            // Load each list the first time its screen is shown.
             if screen == Screen::Engines
                 && state.engines_tab == EnginesTab::Available
                 && matches!(state.remote, Load::Idle)
             {
                 return load_remote(state, false);
+            }
+            if screen == Screen::Projects && matches!(state.projects, Load::Idle) {
+                return reload_projects(state);
             }
             Task::none()
         }
@@ -203,33 +232,7 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
 
-        Message::Install { variant, version } => {
-            if state.is_installing(variant, version) {
-                return Task::none();
-            }
-            // Make the install cancelable. The abort handle stops the download,
-            // the cancel flag stops the extract that runs off the executor.
-            let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let (task, abort) = tasks::install_engine(
-                state.ctx.repository(),
-                state.ctx.install_manager(),
-                state.ctx.client().clone(),
-                variant,
-                version,
-                cancel.clone(),
-            )
-            .abortable();
-            state.jobs.push(state::InstallJob {
-                variant,
-                version,
-                total: None,
-                downloaded: 0,
-                installing: false,
-                abort,
-                cancel,
-            });
-            task
-        }
+        Message::Install { variant, version } => start_install(state, variant, version),
         Message::CancelInstall { variant, version } => {
             if let Some(job) = state.job(variant, version) {
                 // Stop the download, and ask the extract to stop if it has begun.
@@ -292,8 +295,16 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
                         format!("Installed {} {}", version.to_tag(), variant.as_str()),
                     );
                     reload_installed(state);
+                    // Resume a launch that was waiting on this install.
+                    if let Some(pending) = state.pending_launch.take() {
+                        return Task::done(Message::LaunchProject {
+                            dir: pending.dir,
+                            run: pending.run,
+                        });
+                    }
                 }
                 Err(err) => {
+                    state.pending_launch = None;
                     state.toast(
                         ToastKind::Error,
                         format!(
@@ -306,6 +317,421 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
             }
             Task::none()
         }
+
+        // Projects.
+        Message::AddProject => tasks::pick_project_folder(),
+        Message::ProjectFolderPicked(None) => Task::none(),
+        Message::ProjectFolderPicked(Some(dir)) => {
+            add_project(state, &dir);
+            reload_projects(state)
+        }
+        Message::RemoveProject(dir) => {
+            state.project_menu_open = None;
+            let file = state.ctx.paths.projects_file();
+            match ProjectList::load(&file) {
+                Ok(mut list) => {
+                    if list.remove(&dir) {
+                        let _ = list.save(&file);
+                        state.toast(ToastKind::Info, "Forgot the project.");
+                    }
+                }
+                Err(err) => {
+                    state.toast(
+                        ToastKind::Error,
+                        format!("Could not update the project list: {err}"),
+                    );
+                }
+            }
+            state.git_status.remove(&dir);
+            reload_projects(state)
+        }
+        Message::OpenProjectFolder(dir) => {
+            state.project_menu_open = None;
+            if let Err(err) = open_path(&dir, &SystemLauncher) {
+                state.toast(
+                    ToastKind::Error,
+                    format!("Could not open the folder: {err}"),
+                );
+            }
+            Task::none()
+        }
+        Message::ToggleProjectMenu(dir) => {
+            state.project_menu_open = if state.project_menu_open.as_deref() == Some(dir.as_path()) {
+                None
+            } else {
+                Some(dir)
+            };
+            Task::none()
+        }
+        Message::CloseProjectMenu => {
+            state.project_menu_open = None;
+            Task::none()
+        }
+        Message::LaunchProject { dir, run } => {
+            state.project_menu_open = None;
+            prepare_launch(state, dir, run)
+        }
+        Message::LaunchFinished(Ok(())) => Task::none(),
+        Message::LaunchFinished(Err(err)) => {
+            state.toast(ToastKind::Error, format!("Could not launch: {err}"));
+            Task::none()
+        }
+        Message::OfferResolved {
+            dir,
+            run,
+            variant,
+            result,
+        } => {
+            match result {
+                Ok(version) => {
+                    let label = format!("{} {}", version.to_tag(), variant.as_str());
+                    state.install_offer = Some(InstallOffer {
+                        variant,
+                        version,
+                        label,
+                        dir,
+                        run,
+                    });
+                }
+                Err(err) => {
+                    state.toast(
+                        ToastKind::Error,
+                        format!("Could not find the engine to install: {err}"),
+                    );
+                }
+            }
+            Task::none()
+        }
+        Message::AcceptOffer => match state.install_offer.take() {
+            Some(offer) => {
+                state.pending_launch = Some(PendingLaunch {
+                    dir: offer.dir,
+                    run: offer.run,
+                });
+                start_install(state, offer.variant, offer.version)
+            }
+            None => Task::none(),
+        },
+        Message::DismissOffer => {
+            state.install_offer = None;
+            Task::none()
+        }
+
+        // Pinning.
+        Message::OpenPinEditor(dir) => {
+            state.project_menu_open = None;
+            let (choices, selected) = pin_choices(state, &dir);
+            state.pin_editor = Some(PinEditor {
+                dir,
+                choices,
+                selected,
+            });
+            Task::none()
+        }
+        Message::PinSelected(choice) => {
+            if let Some(editor) = &mut state.pin_editor {
+                editor.selected = Some(choice);
+            }
+            Task::none()
+        }
+        Message::CancelPin => {
+            state.pin_editor = None;
+            Task::none()
+        }
+        Message::SavePin => {
+            let Some(editor) = state.pin_editor.take() else {
+                return Task::none();
+            };
+            let Some(choice) = editor.selected else {
+                return Task::none();
+            };
+            match GodotProject::set_pin(&editor.dir, choice.pattern) {
+                Ok(()) => {
+                    state.toast(ToastKind::Info, format!("Pinned to {}.", choice.pattern));
+                    return reload_projects(state);
+                }
+                Err(err) => {
+                    state.toast(ToastKind::Error, format!("Could not pin: {err}"));
+                }
+            }
+            Task::none()
+        }
+
+        // Version control.
+        Message::RefreshGitStatuses => match &state.projects {
+            Load::Loaded(entries) => {
+                let checks: Vec<Task<Message>> = entries
+                    .iter()
+                    .map(|entry| tasks::git_status(entry.path.clone()))
+                    .collect();
+                Task::batch(checks)
+            }
+            _ => Task::none(),
+        },
+        Message::GitStatusLoaded { dir, status } => {
+            match status {
+                Some(status) => {
+                    state.git_status.insert(dir, status);
+                }
+                None => {
+                    state.git_status.remove(&dir);
+                }
+            }
+            Task::none()
+        }
+        Message::UpdateProject(dir) => {
+            state.project_menu_open = None;
+            state.toast(ToastKind::Info, "Checking the remote...");
+            tasks::update_project(dir)
+        }
+        Message::ProjectUpdated { dir, result } => {
+            match result {
+                Ok(outcome) => state.toast(ToastKind::Info, describe_update(outcome)),
+                Err(err) => state.toast(ToastKind::Error, format!("Could not update: {err}")),
+            }
+            tasks::git_status(dir)
+        }
+
+        // Cloning.
+        Message::OpenCloneDialog => {
+            state.clone_dialog = Some(CloneDialog::default());
+            Task::none()
+        }
+        Message::CloneUrlChanged(url) => {
+            if let Some(dialog) = &mut state.clone_dialog {
+                dialog.url = url;
+            }
+            Task::none()
+        }
+        Message::CancelClone => {
+            state.clone_dialog = None;
+            Task::none()
+        }
+        Message::StartClone => {
+            let Some(dialog) = state.clone_dialog.take() else {
+                return Task::none();
+            };
+            let url = dialog.url.trim().to_string();
+            if url.is_empty() {
+                state.toast(ToastKind::Error, "Enter a repository url.");
+                return Task::none();
+            }
+            tasks::pick_clone_destination(url)
+        }
+        Message::CloneDestinationPicked { url, dest } => match dest {
+            Some(dest) => {
+                state.toast(ToastKind::Info, "Cloning...");
+                tasks::clone_repo(url, dest, state.ctx.paths.projects_file())
+            }
+            None => Task::none(),
+        },
+        Message::Cloned(Ok(entry)) => {
+            match entry {
+                Some(_) => state.toast(ToastKind::Info, "Cloned and added the project."),
+                None => state.toast(
+                    ToastKind::Info,
+                    "Cloned, but there was no project.godot so it was not added.",
+                ),
+            }
+            reload_projects(state)
+        }
+        Message::Cloned(Err(err)) => {
+            state.toast(ToastKind::Error, format!("Could not clone: {err}"));
+            Task::none()
+        }
+    }
+}
+
+/// Start a cancelable install and track it as a job.
+fn start_install(state: &mut App, variant: Variant, version: GodotVersion) -> Task<Message> {
+    if state.is_installing(variant, version) {
+        return Task::none();
+    }
+    // The abort handle stops the download, the cancel flag stops the extract that
+    // runs off the executor.
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (task, abort) = tasks::install_engine(
+        state.ctx.repository(),
+        state.ctx.install_manager(),
+        state.ctx.client().clone(),
+        variant,
+        version,
+        cancel.clone(),
+    )
+    .abortable();
+    state.jobs.push(state::InstallJob {
+        variant,
+        version,
+        total: None,
+        downloaded: 0,
+        installing: false,
+        abort,
+        cancel,
+    });
+    task
+}
+
+/// Load a project from a folder and add it to the saved list.
+fn add_project(state: &mut App, dir: &Path) {
+    match GodotProject::load(dir) {
+        Ok(project) => {
+            let file = state.ctx.paths.projects_file();
+            match ProjectList::load(&file) {
+                Ok(mut list) => {
+                    let added = list.add(dir, project.name.clone());
+                    if let Err(err) = list.save(&file) {
+                        state.toast(ToastKind::Error, format!("Could not save: {err}"));
+                        return;
+                    }
+                    state.toast(
+                        ToastKind::Info,
+                        if added {
+                            "Added the project."
+                        } else {
+                            "Updated the project."
+                        },
+                    );
+                }
+                Err(err) => {
+                    state.toast(
+                        ToastKind::Error,
+                        format!("Could not read the project list: {err}"),
+                    );
+                }
+            }
+        }
+        Err(err) => state.toast(ToastKind::Error, format!("Not a Godot project: {err}")),
+    }
+}
+
+/// Reload the project list and the parsed info for each, and start a git status
+/// check for each project.
+fn reload_projects(state: &mut App) -> Task<Message> {
+    let file = state.ctx.paths.projects_file();
+    match ProjectList::load(&file) {
+        Ok(list) => {
+            let entries = list.entries().to_vec();
+            state.project_info.clear();
+            let mut checks = Vec::new();
+            for entry in &entries {
+                if let Ok(project) = GodotProject::load(&entry.path) {
+                    state.project_info.insert(entry.path.clone(), project);
+                }
+                checks.push(tasks::git_status(entry.path.clone()));
+            }
+            state.projects = Load::Loaded(entries);
+            Task::batch(checks)
+        }
+        Err(err) => {
+            state.projects = Load::Failed(err.to_string());
+            Task::none()
+        }
+    }
+}
+
+/// Begin an edit or run. Launches when an engine is ready, otherwise resolves the
+/// engine the project needs and raises the install offer.
+fn prepare_launch(state: &mut App, dir: std::path::PathBuf, run: bool) -> Task<Message> {
+    let project = match GodotProject::load(&dir) {
+        Ok(project) => project,
+        Err(err) => {
+            state.toast(
+                ToastKind::Error,
+                format!("Could not read the project: {err}"),
+            );
+            return Task::none();
+        }
+    };
+    match engine_for_project(&state.ctx.install_manager(), &project) {
+        Ok(_) => {
+            let mut settings = state.ctx.settings.clone();
+            settings.launch_detached = true;
+            tasks::launch_project(state.ctx.install_manager(), settings, project, run)
+        }
+        Err(LaunchError::NotInstalled { .. }) => match project.required_engine() {
+            Some((pattern, variant)) => tasks::resolve_offer(
+                state.ctx.repository(),
+                pattern,
+                variant,
+                state.ctx.settings.include_prereleases,
+                dir,
+                run,
+            ),
+            None => {
+                state.toast(
+                    ToastKind::Error,
+                    "This project names no engine version. Pin one first.",
+                );
+                Task::none()
+            }
+        },
+        Err(other) => {
+            state.toast(ToastKind::Error, format!("Could not launch: {other}"));
+            Task::none()
+        }
+    }
+}
+
+/// Build the pin dropdown choices for a project, with its detected version
+/// suggested at the top, then the installed versions of its variant. The
+/// selected choice starts on the suggestion.
+fn pin_choices(state: &App, dir: &Path) -> (Vec<PinChoice>, Option<PinChoice>) {
+    let project = state.project_info.get(dir);
+    let variant = project.map(|project| {
+        if project.uses_csharp {
+            Variant::Mono
+        } else {
+            Variant::Standard
+        }
+    });
+    let detected = project.and_then(|project| project.pinned_version.or(project.feature_version));
+
+    let mut choices: Vec<PinChoice> = Vec::new();
+    if let Some(pattern) = detected {
+        choices.push(PinChoice {
+            pattern,
+            label: format!("{pattern}  (suggested)"),
+        });
+    }
+
+    if let Load::Loaded(engines) = &state.installed {
+        let mut versions: Vec<GodotVersion> = engines
+            .iter()
+            .filter(|engine| variant.is_none_or(|variant| engine.variant == variant))
+            .map(|engine| engine.version)
+            .collect();
+        versions.sort_by(|a, b| b.cmp(a));
+        versions.dedup();
+        for version in versions {
+            if let Ok(pattern) = version.to_tag().parse::<VersionPattern>() {
+                // Skip the one already shown as the suggestion.
+                if detected == Some(pattern) {
+                    continue;
+                }
+                choices.push(PinChoice {
+                    pattern,
+                    label: version.to_tag(),
+                });
+            }
+        }
+    }
+
+    let selected = choices.first().cloned();
+    (choices, selected)
+}
+
+/// A short message for the result of a project update.
+fn describe_update(outcome: UpdateOutcome) -> &'static str {
+    match outcome {
+        UpdateOutcome::AlreadyUpToDate => "Already up to date.",
+        UpdateOutcome::Advanced => "Updated to the latest from the remote.",
+        UpdateOutcome::Blocked(BlockReason::LocalChanges) => {
+            "Not updated. There are local changes."
+        }
+        UpdateOutcome::Blocked(BlockReason::Diverged) => {
+            "Not updated. The history has diverged from the remote."
+        }
+        UpdateOutcome::Blocked(BlockReason::NoRemote) => "Not updated. There is no tracked remote.",
     }
 }
 
@@ -345,10 +771,7 @@ fn reload_installed(state: &mut App) {
 fn view(state: &App) -> Element<'_, Message> {
     let screen = match state.screen {
         Screen::Engines => screens::engines::view(state),
-        Screen::Projects => screens::placeholder(
-            "Projects",
-            "The projects screen is coming soon. It will list your projects, bind each to an engine version, and launch the editor.",
-        ),
+        Screen::Projects => screens::projects::view(state),
         Screen::Settings => screens::settings::view(state),
     };
 
@@ -367,9 +790,26 @@ fn view(state: &App) -> Element<'_, Message> {
         stack![base, toast_layer(state)].into()
     };
 
-    // Lay the remove confirmation over everything when it is open.
-    match state.confirm_remove {
-        Some((variant, version)) => modal(layered, confirm_remove_dialog(variant, version)),
+    // Lay one dialog over everything when it is open. The backdrop dismisses it.
+    let dialog: Option<(Element<'_, Message>, Message)> =
+        if let Some((variant, version)) = state.confirm_remove {
+            Some((
+                confirm_remove_dialog(variant, version),
+                Message::CancelRemove,
+            ))
+        } else if let Some(offer) = &state.install_offer {
+            Some((offer_dialog(offer), Message::DismissOffer))
+        } else if let Some(editor) = &state.pin_editor {
+            Some((pin_dialog(editor), Message::CancelPin))
+        } else {
+            state
+                .clone_dialog
+                .as_ref()
+                .map(|clone| (clone_dialog_view(clone), Message::CancelClone))
+        };
+
+    match dialog {
+        Some((dialog, dismiss)) => modal(layered, dialog, dismiss),
         None => layered,
     }
 }
@@ -422,8 +862,13 @@ fn toast_view(toast: &Toast) -> Element<'_, Message> {
 }
 
 /// Lay a dialog over the base view behind a dimmed backdrop. Clicking the
-/// backdrop cancels. The opaque wrappers stop clicks reaching the base.
-fn modal<'a>(base: Element<'a, Message>, dialog: Element<'a, Message>) -> Element<'a, Message> {
+/// backdrop sends the dismiss message. The opaque wrappers stop clicks reaching
+/// the base.
+fn modal<'a>(
+    base: Element<'a, Message>,
+    dialog: Element<'a, Message>,
+    dismiss: Message,
+) -> Element<'a, Message> {
     stack![
         base,
         opaque(
@@ -433,9 +878,127 @@ fn modal<'a>(base: Element<'a, Message>, dialog: Element<'a, Message>) -> Elemen
                     ..container::Style::default()
                 }
             }))
-            .on_press(Message::CancelRemove)
+            .on_press(dismiss)
         )
     ]
+    .into()
+}
+
+/// The install offer dialog, raised when a launch needs an engine that is not
+/// installed.
+fn offer_dialog<'a>(offer: &InstallOffer) -> Element<'a, Message> {
+    let actions = row![
+        space::horizontal(),
+        button(text("Not now"))
+            .padding(style::BTN_PAD)
+            .style(style::button_secondary)
+            .on_press(Message::DismissOffer),
+        button(text("Install"))
+            .padding(style::BTN_PAD)
+            .style(style::button_primary)
+            .on_press(Message::AcceptOffer),
+    ]
+    .spacing(style::GAP_S)
+    .align_y(Alignment::Center);
+
+    container(
+        column![
+            text(format!("Install {}?", offer.label)).size(style::TEXT_HEADING),
+            text("This project needs an engine version that is not installed.")
+                .size(style::TEXT_BODY),
+            actions,
+        ]
+        .spacing(style::GAP_M),
+    )
+    .padding(style::GAP_L)
+    .max_width(460.0)
+    .style(style::card)
+    .into()
+}
+
+/// The pin editor dialog for setting a project's engine version. It is a dropdown
+/// of installed versions, with the project's detected version suggested.
+fn pin_dialog<'a>(editor: &'a PinEditor) -> Element<'a, Message> {
+    let mut actions = row![space::horizontal()]
+        .spacing(style::GAP_S)
+        .align_y(Alignment::Center);
+    actions = actions.push(
+        button(text("Cancel"))
+            .padding(style::BTN_PAD)
+            .style(style::button_secondary)
+            .on_press(Message::CancelPin),
+    );
+
+    let body: Element<'a, Message> = if editor.choices.is_empty() {
+        text("No installed engine versions to pin. Install one first.")
+            .size(style::TEXT_BODY)
+            .into()
+    } else {
+        actions = actions.push(
+            button(text("Save"))
+                .padding(style::BTN_PAD)
+                .style(style::button_primary)
+                .on_press(Message::SavePin),
+        );
+        pick_list(
+            editor.choices.as_slice(),
+            editor.selected.clone(),
+            Message::PinSelected,
+        )
+        .style(style::pick_list)
+        .width(Length::Fill)
+        .into()
+    };
+
+    container(
+        column![
+            text("Set engine version").size(style::TEXT_HEADING),
+            text("Choose an installed version. It is saved in project.godot.")
+                .size(style::TEXT_CAPTION),
+            body,
+            actions,
+        ]
+        .spacing(style::GAP_M),
+    )
+    .padding(style::GAP_L)
+    .max_width(460.0)
+    .style(style::card)
+    .into()
+}
+
+/// The clone dialog for cloning a repository as a new project.
+fn clone_dialog_view<'a>(dialog: &CloneDialog) -> Element<'a, Message> {
+    let actions = row![
+        space::horizontal(),
+        button(text("Cancel"))
+            .padding(style::BTN_PAD)
+            .style(style::button_secondary)
+            .on_press(Message::CancelClone),
+        button(text("Choose folder and clone"))
+            .padding(style::BTN_PAD)
+            .style(style::button_primary)
+            .on_press(Message::StartClone),
+    ]
+    .spacing(style::GAP_S)
+    .align_y(Alignment::Center);
+
+    container(
+        column![
+            text("Clone a repository").size(style::TEXT_HEADING),
+            text("Enter a git url. You pick the destination folder next.")
+                .size(style::TEXT_CAPTION),
+            text_input("https://example.com/game.git", &dialog.url)
+                .on_input(Message::CloneUrlChanged)
+                .on_submit(Message::StartClone)
+                .style(style::text_input)
+                .width(Length::Fill),
+            actions,
+        ]
+        .spacing(style::GAP_M),
+    )
+    .padding(style::GAP_L)
+    .max_width(480.0)
+    .style(style::card)
     .into()
 }
 

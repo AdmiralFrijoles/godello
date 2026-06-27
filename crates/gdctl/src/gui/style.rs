@@ -58,6 +58,10 @@ pub const TEXT_CAPTION: f32 = 12.0;
 pub const BTN_PAD: [f32; 2] = [6.0, 12.0];
 pub const BTN_PAD_COMPACT: [f32; 2] = [3.0, 8.0];
 
+/// How long the pointer must rest on something before its tooltip appears, so
+/// tooltips do not flash as the pointer passes over them.
+pub const TOOLTIP_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+
 /// A hair line border in a neutral tier, at the given radius.
 fn hairline(theme: &Theme, radius: f32) -> Border {
     Border {
@@ -96,6 +100,49 @@ pub fn badge(theme: &Theme) -> container::Style {
         text_color: Some(palette.secondary.weak.text),
         border: border::rounded(RADIUS_PILL),
         ..container::Style::default()
+    }
+}
+
+/// The left half of a joined pill pair. Only the left corners are rounded, so it
+/// sits flush against the right half and the two read as one pill.
+pub fn badge_left(theme: &Theme) -> container::Style {
+    let palette = theme.extended_palette();
+    container::Style {
+        background: Some(palette.secondary.weak.color.into()),
+        text_color: Some(palette.secondary.weak.text),
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: border::Radius::from(0.0)
+                .top_left(RADIUS_PILL)
+                .bottom_left(RADIUS_PILL),
+        },
+        ..container::Style::default()
+    }
+}
+
+/// The right half of a joined pill pair. Only the right corners are rounded. The
+/// warning flag tints it for a state that wants attention.
+pub fn badge_right(warning: bool) -> impl Fn(&Theme) -> container::Style {
+    move |theme| {
+        let palette = theme.extended_palette();
+        let pair = if warning {
+            palette.warning.weak
+        } else {
+            palette.secondary.weak
+        };
+        container::Style {
+            background: Some(pair.color.into()),
+            text_color: Some(pair.text),
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: border::Radius::from(0.0)
+                    .top_right(RADIUS_PILL)
+                    .bottom_right(RADIUS_PILL),
+            },
+            ..container::Style::default()
+        }
     }
 }
 

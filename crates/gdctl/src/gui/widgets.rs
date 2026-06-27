@@ -87,7 +87,8 @@ fn chip(full: &str, size: Size) -> Element<'static, Message> {
             .style(style::card),
         tooltip::Position::Top,
     )
-    .gap(style::GAP_XS);
+    .gap(style::GAP_XS)
+    .delay(style::TOOLTIP_DELAY);
 
     // The whole chip is the copy button. The path text takes the button text
     // color, so it turns the accent color while the mouse is down.
