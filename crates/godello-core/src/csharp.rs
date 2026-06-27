@@ -86,6 +86,9 @@ fn run_godot_build(
         project_dir.as_os_str().to_os_string(),
         OsString::from("--build-solutions"),
         OsString::from("--quit"),
+        OsString::from("--quiet"),
+        OsString::from("--no-header"),
+        OsString::from("--headless"),
     ];
     let outcome = runner.run(editor.as_os_str(), &args, project_dir)?;
     finish(outcome)
