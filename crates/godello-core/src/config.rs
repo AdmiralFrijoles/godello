@@ -90,6 +90,9 @@ pub struct Settings {
     pub include_prereleases: bool,
     /// The variant used when a command does not say.
     pub default_variant: Variant,
+    /// Start the editor or project detached so the command returns right away.
+    /// When off, the command stays attached and waits for the editor to close.
+    pub launch_detached: bool,
 }
 
 impl Default for Settings {
@@ -100,6 +103,7 @@ impl Default for Settings {
             csharp_build_tool: CsharpBuildTool::Godot,
             include_prereleases: false,
             default_variant: Variant::Standard,
+            launch_detached: false,
         }
     }
 }
@@ -149,6 +153,7 @@ impl Settings {
             "csharp_build_tool" => Some(self.csharp_build_tool.to_string()),
             "include_prereleases" => Some(self.include_prereleases.to_string()),
             "default_variant" => Some(self.default_variant.to_string()),
+            "launch_detached" => Some(self.launch_detached.to_string()),
             _ => None,
         }
     }
@@ -175,6 +180,9 @@ impl Settings {
             }
             "include_prereleases" => {
                 self.include_prereleases = parse_bool(key, value)?;
+            }
+            "launch_detached" => {
+                self.launch_detached = parse_bool(key, value)?;
             }
             "default_variant" => {
                 self.default_variant = value.parse().map_err(|_| ConfigError::InvalidValue {
@@ -366,6 +374,7 @@ mod tests {
         assert!(!settings.include_prereleases);
         assert_eq!(settings.default_variant, Variant::Standard);
         assert_eq!(settings.engine_install_dir, None);
+        assert!(!settings.launch_detached);
     }
 
     #[test]

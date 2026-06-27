@@ -8,6 +8,7 @@ pub mod config;
 pub mod csharp;
 pub mod godot_github;
 pub mod install;
+pub mod launch;
 pub mod platform;
 pub mod project;
 pub mod repository;
@@ -19,6 +20,10 @@ pub use csharp::{
 };
 pub use godot_github::GodotGitHubRepository;
 pub use install::{Downloader, InstallError, InstallManager, InstalledEngine};
+pub use launch::{
+    LaunchError, Launcher, SystemLauncher, engine_for_project, open_editor, open_version,
+    run_project,
+};
 pub use platform::{Arch, Os, PlatformError, Target};
 pub use project::{GodotProject, ProjectError, find_project_dir};
 pub use repository::{

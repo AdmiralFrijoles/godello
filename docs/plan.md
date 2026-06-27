@@ -144,7 +144,8 @@ Reads and tracks projects.
   project manager for that engine, the same as starting Godot on its own.
 - Resolve the project pin to an installed engine. If none matches, return a clear
   error the caller can turn into an install prompt.
-- Run the editor detached so the CLI returns. Run mode can stay attached.
+- Start attached by default so the command waits for the editor to close. The
+  launch_detached setting starts it detached so the command returns right away.
 
 ### git
 
@@ -191,6 +192,8 @@ Settings for milestone 1:
 - include_prereleases. Whether remote version lists include rc, beta, and dev by
   default. Default off.
 - default_variant. Standard or Mono when a command does not say. Default Standard.
+- launch_detached. Start the editor or project detached so the command returns
+  right away. When off the command waits for the editor to close. Default off.
 
 More settings get added as features land. Each setting has a default, so a missing
 or fresh config file still works.
@@ -306,7 +309,6 @@ Milestone 3, polish.
 ## Open points to revisit
 
 - Exact app data paths per OS once directories is wired in.
-- Whether run mode should stay attached or also detach.
 - How much of the Godot website manifest we cache versus query live.
 - Git via the system git command versus a bundled library such as git2. System git
   is simpler but requires git on the path. To be confirmed before building the git
