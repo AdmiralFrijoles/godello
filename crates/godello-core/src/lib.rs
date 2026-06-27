@@ -14,11 +14,12 @@ pub mod platform;
 pub mod process;
 pub mod project;
 pub mod repository;
+pub mod vcs;
 pub mod version;
 
 pub use config::{ConfigError, Paths, ProjectEntry, ProjectList, Settings};
 pub use csharp::{CsharpBuildTool, CsharpError, build_solutions};
-pub use git::{BlockReason, Git, RepoStatus, UpdateOutcome, VcsError, VersionControl};
+pub use git::Git;
 pub use godot_github::GodotGitHubRepository;
 pub use install::{Downloader, InstallError, InstallManager, InstalledEngine};
 pub use launch::{
@@ -31,6 +32,7 @@ pub use project::{GodotProject, ProjectError, find_project_dir};
 pub use repository::{
     Asset, Checksum, ChecksumAlgorithm, EngineRepository, HttpClient, Release, RepositoryError,
 };
+pub use vcs::{BlockReason, RepoStatus, SyncState, UpdateOutcome, VcsError, VersionControl};
 pub use version::{GodotVersion, Stage, Variant, VersionParseError, VersionPattern};
 
 /// Name of the application, shown in user facing output.

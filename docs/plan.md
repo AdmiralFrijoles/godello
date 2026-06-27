@@ -147,11 +147,17 @@ Reads and tracks projects.
 - Start attached by default so the command waits for the editor to close. The
   launch_detached setting starts it detached so the command returns right away.
 
-### git
+### vcs and git
 
-Optional git integration for projects. It uses the system git command through the
-same command runner used for builds, so it is a clean no op when a project is not a
-git repo or when git is not installed.
+Optional version control integration for projects. The vcs module holds the
+generic VersionControl trait and shared types, with names that are not tied to git
+so other systems can be added later. Its concepts were informed by studying git,
+Mercurial, Subversion, Fossil, Jujutsu, Perforce, and Lore. See
+docs/research/version-control-systems.md.
+
+Git is the first implementation, in the git module. It uses the system git command
+through the same command runner used for builds, so it is a clean no op when a
+project is not a git repo or when git is not installed.
 
 Status reads, all safe and read only:
 
@@ -291,7 +297,7 @@ To be pinned when first used.
 Milestone 1, command line core.
 
 - version, repository with github, platform, install, project, csharp, launch,
-  git, config, error.
+  vcs with a git implementation, config, error.
 - gdctl commands above, including the git commands and the non interactive option.
 - Tests for version parsing and matching, asset selection per target, project.godot
   parsing, and the install layout.

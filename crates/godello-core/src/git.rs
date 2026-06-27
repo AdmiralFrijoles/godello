@@ -1,87 +1,15 @@
-//! Version control integration for projects.
-//!
-//! The VersionControl trait is the contract. Git is the first implementation.
-//! Keeping this generic means other version control systems can be added later
-//! without changing the callers.
+//! The git implementation of the version control abstraction.
 //!
 //! Git runs through the shared command runner, so it is a clean failure when git
 //! is not installed and is fully tested with a fake runner. Status reads are safe
-//! and read only. The only changing actions are a fast forward update and an
-//! explicit reset, which loses local changes and is never done on its own.
+//! and read only. The only changing actions are an update that advances cleanly
+//! and an explicit reset, which loses local changes and is never done on its own.
 
 use std::ffi::{OsStr, OsString};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::process::{CommandOutcome, CommandRunner, ProcessError};
-
-/// The state of a project's repository.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RepoStatus {
-    /// The checked out branch, or None when the head is detached.
-    pub branch: Option<String>,
-    /// The upstream tracking branch, or None when there is none.
-    pub upstream: Option<String>,
-    /// Commits the branch is ahead of its upstream.
-    pub ahead: u32,
-    /// Commits the branch is behind its upstream.
-    pub behind: u32,
-    /// True when the working tree has uncommitted changes.
-    pub dirty: bool,
-}
-
-impl RepoStatus {
-    /// True when the branch tracks an upstream and matches it.
-    pub fn is_up_to_date(&self) -> bool {
-        self.upstream.is_some() && self.ahead == 0 && self.behind == 0
-    }
-}
-
-/// The result of trying to bring a branch up to date.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UpdateOutcome {
-    /// Nothing to do, the branch was not behind its upstream.
-    AlreadyUpToDate,
-    /// The branch was fast forwarded to its upstream.
-    FastForwarded,
-    /// The update was not done. The caller can explain and offer a reset.
-    Blocked(BlockReason),
-}
-
-/// Why an update did not happen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BlockReason {
-    /// The working tree has uncommitted changes.
-    Dirty,
-    /// The branch and its upstream have diverged, so it is not a fast forward.
-    NotFastForward,
-    /// The branch has no upstream to update from.
-    NoUpstream,
-}
-
-/// The contract for a version control system.
-pub trait VersionControl {
-    /// A short stable id, for example git.
-    fn id(&self) -> &str;
-
-    /// True when the folder is a working copy of this system.
-    fn is_repo(&self, dir: &Path) -> bool;
-
-    /// Read the status of the repository in a folder. When fetch is true the
-    /// remote refs are updated first so the ahead and behind counts are current.
-    fn status(&self, dir: &Path, fetch: bool) -> Result<RepoStatus, VcsError>;
-
-    /// Bring the branch up to date with its upstream by fast forward only. Does
-    /// nothing and reports a block when the tree is dirty, there is no upstream,
-    /// or the history has diverged.
-    fn update(&self, dir: &Path) -> Result<UpdateOutcome, VcsError>;
-
-    /// Hard reset the branch to its upstream. This loses local changes and local
-    /// commits. It is a separate explicit action, never part of an update.
-    fn reset_to_upstream(&self, dir: &Path) -> Result<(), VcsError>;
-
-    /// Clone a repository url into a destination folder.
-    fn clone_repo(&self, url: &str, dest: &Path) -> Result<(), VcsError>;
-}
+use crate::process::{CommandOutcome, CommandRunner};
+use crate::vcs::{BlockReason, RepoStatus, SyncState, UpdateOutcome, VcsError, VersionControl};
 
 /// Git, backed by the system git command through a command runner.
 pub struct Git<C> {
@@ -119,7 +47,7 @@ impl<C: CommandRunner> Git<C> {
         }
     }
 
-    fn upstream(&self, dir: &Path) -> Result<Option<String>, VcsError> {
+    fn tracked_remote(&self, dir: &Path) -> Result<Option<String>, VcsError> {
         let out = self.run(
             dir,
             &[
@@ -149,7 +77,7 @@ impl<C: CommandRunner> Git<C> {
         }
     }
 
-    fn is_dirty(&self, dir: &Path) -> Result<bool, VcsError> {
+    fn has_local_changes(&self, dir: &Path) -> Result<bool, VcsError> {
         let out = self.run(dir, &["status", "--porcelain"])?;
         Ok(!out.trimmed_stdout().is_empty())
     }
@@ -164,65 +92,69 @@ impl<C: CommandRunner> VersionControl for Git<C> {
         self.ensure_repo(dir).is_ok()
     }
 
-    fn status(&self, dir: &Path, fetch: bool) -> Result<RepoStatus, VcsError> {
+    fn status(&self, dir: &Path, contact_remote: bool) -> Result<RepoStatus, VcsError> {
         self.ensure_repo(dir)?;
-        if fetch {
+        if contact_remote {
             // Best effort. A failed fetch, for example with no network, leaves
             // the answer based on the last known remote refs.
             self.run(dir, &["fetch"])?;
         }
         let branch = self.current_branch(dir)?;
-        let upstream = self.upstream(dir)?;
-        let (ahead, behind) = if upstream.is_some() {
-            self.ahead_behind(dir)?
-        } else {
-            (0, 0)
+        let tracked_remote = self.tracked_remote(dir)?;
+        let sync = match &tracked_remote {
+            Some(_) => {
+                let (ahead, behind) = self.ahead_behind(dir)?;
+                sync_state(ahead, behind)
+            }
+            None => SyncState::NoRemote,
         };
-        let dirty = self.is_dirty(dir)?;
+        let has_local_changes = self.has_local_changes(dir)?;
         Ok(RepoStatus {
             branch,
-            upstream,
-            ahead,
-            behind,
-            dirty,
+            tracked_remote,
+            sync,
+            has_local_changes,
         })
     }
 
     fn update(&self, dir: &Path) -> Result<UpdateOutcome, VcsError> {
         let status = self.status(dir, true)?;
-        if status.upstream.is_none() {
-            return Ok(UpdateOutcome::Blocked(BlockReason::NoUpstream));
+        if matches!(status.sync, SyncState::NoRemote) {
+            return Ok(UpdateOutcome::Blocked(BlockReason::NoRemote));
         }
-        if status.dirty {
-            return Ok(UpdateOutcome::Blocked(BlockReason::Dirty));
+        if status.has_local_changes {
+            return Ok(UpdateOutcome::Blocked(BlockReason::LocalChanges));
         }
-        if status.behind == 0 {
-            return Ok(UpdateOutcome::AlreadyUpToDate);
-        }
-        if status.ahead > 0 {
-            // Behind and ahead means the history diverged.
-            return Ok(UpdateOutcome::Blocked(BlockReason::NotFastForward));
-        }
-        let out = self.run(dir, &["merge", "--ff-only", "@{upstream}"])?;
-        if out.success {
-            Ok(UpdateOutcome::FastForwarded)
-        } else {
-            Ok(UpdateOutcome::Blocked(BlockReason::NotFastForward))
+        match status.sync {
+            // Up to date, or only ahead, means there is nothing to pull in.
+            SyncState::UpToDate | SyncState::Ahead { .. } => Ok(UpdateOutcome::AlreadyUpToDate),
+            SyncState::Diverged => Ok(UpdateOutcome::Blocked(BlockReason::Diverged)),
+            SyncState::Behind { .. } => {
+                let out = self.run(dir, &["merge", "--ff-only", "@{upstream}"])?;
+                if out.success {
+                    Ok(UpdateOutcome::Advanced)
+                } else {
+                    Ok(UpdateOutcome::Blocked(BlockReason::Diverged))
+                }
+            }
+            // Git does not produce these here, but be conservative.
+            SyncState::NoRemote => Ok(UpdateOutcome::Blocked(BlockReason::NoRemote)),
+            SyncState::Unknown => Ok(UpdateOutcome::Blocked(BlockReason::Diverged)),
         }
     }
 
-    fn reset_to_upstream(&self, dir: &Path) -> Result<(), VcsError> {
+    fn reset_to_remote(&self, dir: &Path) -> Result<(), VcsError> {
         self.ensure_repo(dir)?;
         self.run(dir, &["fetch"])?;
-        if self.upstream(dir)?.is_none() {
-            return Err(VcsError::NoUpstream);
+        if self.tracked_remote(dir)?.is_none() {
+            return Err(VcsError::NoRemote);
         }
         let out = self.run(dir, &["reset", "--hard", "@{upstream}"])?;
         if out.success {
             Ok(())
         } else {
             Err(VcsError::Command {
-                what: "reset".to_string(),
+                what: "git reset".to_string(),
                 output: out.combined(),
             })
         }
@@ -242,72 +174,35 @@ impl<C: CommandRunner> VersionControl for Git<C> {
             Ok(())
         } else {
             Err(VcsError::Command {
-                what: "clone".to_string(),
+                what: "git clone".to_string(),
                 output: out.combined(),
             })
         }
     }
 }
 
+/// Turn ahead and behind counts into a sync state.
+fn sync_state(ahead: u32, behind: u32) -> SyncState {
+    match (ahead, behind) {
+        (0, 0) => SyncState::UpToDate,
+        (0, behind) => SyncState::Behind {
+            commits: Some(behind),
+        },
+        (ahead, 0) => SyncState::Ahead {
+            commits: Some(ahead),
+        },
+        _ => SyncState::Diverged,
+    }
+}
+
 /// Parse the output of a left right count. Git prints the upstream only count
-/// first, which is how far behind the branch is, then the head only count, which
-/// is how far ahead it is. Returns ahead then behind.
+/// first, which is how far behind the working copy is, then the head only count,
+/// which is how far ahead it is. Returns ahead then behind.
 fn parse_ahead_behind(text: &str) -> (u32, u32) {
     let mut parts = text.split_whitespace();
     let behind = parts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
     let ahead = parts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
     (ahead, behind)
-}
-
-/// An error from a version control action.
-#[derive(Debug)]
-pub enum VcsError {
-    /// The version control program is not installed.
-    NotInstalled,
-    /// The folder is not a working copy.
-    NotARepo(PathBuf),
-    /// The branch has no upstream, so the action cannot run.
-    NoUpstream,
-    /// A command failed in a way that was not expected.
-    Command { what: String, output: String },
-    /// The process could not be started or read.
-    Process(ProcessError),
-}
-
-impl std::fmt::Display for VcsError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            VcsError::NotInstalled => write!(f, "git is not installed"),
-            VcsError::NotARepo(path) => write!(f, "{} is not a git repository", path.display()),
-            VcsError::NoUpstream => write!(f, "the branch has no upstream"),
-            VcsError::Command { what, output } => {
-                if output.is_empty() {
-                    write!(f, "git {what} failed")
-                } else {
-                    write!(f, "git {what} failed:\n{output}")
-                }
-            }
-            VcsError::Process(err) => write!(f, "{err}"),
-        }
-    }
-}
-
-impl std::error::Error for VcsError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            VcsError::Process(err) => Some(err),
-            _ => None,
-        }
-    }
-}
-
-impl From<ProcessError> for VcsError {
-    fn from(err: ProcessError) -> Self {
-        match err {
-            ProcessError::ProgramNotFound(_) => VcsError::NotInstalled,
-            other => VcsError::Process(other),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -341,7 +236,6 @@ mod tests {
             }
         }
 
-        /// Set a response for a subcommand, matched by its joined arguments.
         fn on(mut self, key: &str, success: bool, stdout: &str) -> Self {
             self.responses.insert(
                 key.to_string(),
@@ -355,8 +249,8 @@ mod tests {
             self
         }
 
-        /// The default response, a working repo with a clean tree, so a test only
-        /// has to set what it cares about.
+        /// A working repo with a clean tree, so a test only sets what it cares
+        /// about.
         fn repo(self) -> Self {
             self.on("rev-parse --is-inside-work-tree", true, "true")
                 .on("branch --show-current", true, "main")
@@ -374,9 +268,11 @@ mod tests {
             program: &OsStr,
             args: &[OsString],
             _cwd: &Path,
-        ) -> Result<CommandOutcome, ProcessError> {
+        ) -> Result<CommandOutcome, crate::process::ProcessError> {
             if self.git_missing {
-                return Err(ProcessError::ProgramNotFound(program.to_os_string()));
+                return Err(crate::process::ProcessError::ProgramNotFound(
+                    program.to_os_string(),
+                ));
             }
             let key = args
                 .iter()
@@ -404,6 +300,14 @@ mod tests {
         Path::new("/some/project")
     }
 
+    #[test]
+    fn sync_state_maps_counts() {
+        assert_eq!(sync_state(0, 0), SyncState::UpToDate);
+        assert_eq!(sync_state(0, 3), SyncState::Behind { commits: Some(3) });
+        assert_eq!(sync_state(2, 0), SyncState::Ahead { commits: Some(2) });
+        assert_eq!(sync_state(2, 3), SyncState::Diverged);
+    }
+
     // Status.
 
     #[test]
@@ -414,23 +318,41 @@ mod tests {
             .on(COUNT_ARGS, true, "0\t0");
         let status = git(runner).status(dir(), false).unwrap();
         assert_eq!(status.branch.as_deref(), Some("main"));
-        assert_eq!(status.upstream.as_deref(), Some("origin/main"));
-        assert_eq!((status.ahead, status.behind), (0, 0));
-        assert!(!status.dirty);
+        assert_eq!(status.tracked_remote.as_deref(), Some("origin/main"));
+        assert_eq!(status.sync, SyncState::UpToDate);
+        assert!(!status.has_local_changes);
         assert!(status.is_up_to_date());
     }
 
     #[test]
-    fn status_parses_ahead_and_behind() {
-        // Git prints behind first, then ahead.
+    fn status_reports_behind_only() {
+        let runner = ScriptedRunner::new()
+            .repo()
+            .on(UPSTREAM_ARGS, true, "origin/main")
+            .on(COUNT_ARGS, true, "3\t0");
+        let status = git(runner).status(dir(), false).unwrap();
+        assert_eq!(status.sync, SyncState::Behind { commits: Some(3) });
+        assert!(!status.is_up_to_date());
+    }
+
+    #[test]
+    fn status_reports_ahead_only() {
+        let runner = ScriptedRunner::new()
+            .repo()
+            .on(UPSTREAM_ARGS, true, "origin/main")
+            .on(COUNT_ARGS, true, "0\t2");
+        let status = git(runner).status(dir(), false).unwrap();
+        assert_eq!(status.sync, SyncState::Ahead { commits: Some(2) });
+    }
+
+    #[test]
+    fn status_reports_diverged() {
         let runner = ScriptedRunner::new()
             .repo()
             .on(UPSTREAM_ARGS, true, "origin/main")
             .on(COUNT_ARGS, true, "3\t2");
         let status = git(runner).status(dir(), false).unwrap();
-        assert_eq!(status.behind, 3);
-        assert_eq!(status.ahead, 2);
-        assert!(!status.is_up_to_date());
+        assert_eq!(status.sync, SyncState::Diverged);
     }
 
     #[test]
@@ -444,26 +366,27 @@ mod tests {
     }
 
     #[test]
-    fn status_reports_no_upstream() {
+    fn status_reports_no_remote() {
         let runner = ScriptedRunner::new().repo().on(UPSTREAM_ARGS, false, "");
         let status = git(runner).status(dir(), false).unwrap();
-        assert_eq!(status.upstream, None);
+        assert_eq!(status.tracked_remote, None);
+        assert_eq!(status.sync, SyncState::NoRemote);
         assert!(!status.is_up_to_date());
     }
 
     #[test]
-    fn status_reports_a_dirty_tree() {
+    fn status_reports_local_changes() {
         let runner = ScriptedRunner::new()
             .repo()
             .on("status --porcelain", true, " M src/main.rs")
             .on(UPSTREAM_ARGS, true, "origin/main")
             .on(COUNT_ARGS, true, "0\t0");
         let status = git(runner).status(dir(), false).unwrap();
-        assert!(status.dirty);
+        assert!(status.has_local_changes);
     }
 
     #[test]
-    fn status_fetches_when_asked() {
+    fn status_contacts_remote_when_asked() {
         let runner = ScriptedRunner::new().repo().on(UPSTREAM_ARGS, false, "");
         let git = git(runner);
         git.status(dir(), true).unwrap();
@@ -471,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn status_does_not_fetch_when_not_asked() {
+    fn status_does_not_contact_remote_when_not_asked() {
         let runner = ScriptedRunner::new().repo().on(UPSTREAM_ARGS, false, "");
         let git = git(runner);
         git.status(dir(), false).unwrap();
@@ -494,37 +417,52 @@ mod tests {
     // Update.
 
     #[test]
-    fn update_does_nothing_when_not_behind() {
+    fn update_does_nothing_when_up_to_date() {
         let runner = ScriptedRunner::new()
             .repo()
             .on(UPSTREAM_ARGS, true, "origin/main")
             .on(COUNT_ARGS, true, "0\t0");
-        let outcome = git(runner).update(dir()).unwrap();
-        assert_eq!(outcome, UpdateOutcome::AlreadyUpToDate);
+        assert_eq!(
+            git(runner).update(dir()).unwrap(),
+            UpdateOutcome::AlreadyUpToDate
+        );
     }
 
     #[test]
-    fn update_fast_forwards_when_behind_only() {
+    fn update_does_nothing_when_only_ahead() {
+        let runner = ScriptedRunner::new()
+            .repo()
+            .on(UPSTREAM_ARGS, true, "origin/main")
+            .on(COUNT_ARGS, true, "0\t2");
+        assert_eq!(
+            git(runner).update(dir()).unwrap(),
+            UpdateOutcome::AlreadyUpToDate
+        );
+    }
+
+    #[test]
+    fn update_advances_when_behind_only() {
         let runner = ScriptedRunner::new()
             .repo()
             .on(UPSTREAM_ARGS, true, "origin/main")
             .on(COUNT_ARGS, true, "2\t0")
             .on("merge --ff-only @{upstream}", true, "Updated");
         let git = git(runner);
-        let outcome = git.update(dir()).unwrap();
-        assert_eq!(outcome, UpdateOutcome::FastForwarded);
+        assert_eq!(git.update(dir()).unwrap(), UpdateOutcome::Advanced);
         assert!(git.runner.called("merge --ff-only @{upstream}"));
     }
 
     #[test]
-    fn update_blocks_a_dirty_tree() {
+    fn update_blocks_on_local_changes() {
         let runner = ScriptedRunner::new()
             .repo()
             .on("status --porcelain", true, " M file")
             .on(UPSTREAM_ARGS, true, "origin/main")
             .on(COUNT_ARGS, true, "2\t0");
-        let outcome = git(runner).update(dir()).unwrap();
-        assert_eq!(outcome, UpdateOutcome::Blocked(BlockReason::Dirty));
+        assert_eq!(
+            git(runner).update(dir()).unwrap(),
+            UpdateOutcome::Blocked(BlockReason::LocalChanges)
+        );
     }
 
     #[test]
@@ -533,15 +471,19 @@ mod tests {
             .repo()
             .on(UPSTREAM_ARGS, true, "origin/main")
             .on(COUNT_ARGS, true, "2\t3");
-        let outcome = git(runner).update(dir()).unwrap();
-        assert_eq!(outcome, UpdateOutcome::Blocked(BlockReason::NotFastForward));
+        assert_eq!(
+            git(runner).update(dir()).unwrap(),
+            UpdateOutcome::Blocked(BlockReason::Diverged)
+        );
     }
 
     #[test]
-    fn update_blocks_without_an_upstream() {
+    fn update_blocks_without_a_remote() {
         let runner = ScriptedRunner::new().repo().on(UPSTREAM_ARGS, false, "");
-        let outcome = git(runner).update(dir()).unwrap();
-        assert_eq!(outcome, UpdateOutcome::Blocked(BlockReason::NoUpstream));
+        assert_eq!(
+            git(runner).update(dir()).unwrap(),
+            UpdateOutcome::Blocked(BlockReason::NoRemote)
+        );
     }
 
     #[test]
@@ -559,30 +501,29 @@ mod tests {
     // Reset.
 
     #[test]
-    fn reset_hard_resets_to_upstream() {
+    fn reset_matches_the_remote() {
         let runner = ScriptedRunner::new()
             .repo()
             .on(UPSTREAM_ARGS, true, "origin/main")
             .on("reset --hard @{upstream}", true, "");
         let git = git(runner);
-        git.reset_to_upstream(dir()).unwrap();
+        git.reset_to_remote(dir()).unwrap();
         assert!(git.runner.called("reset --hard @{upstream}"));
     }
 
     #[test]
-    fn reset_without_an_upstream_errors() {
+    fn reset_without_a_remote_errors() {
         let runner = ScriptedRunner::new().repo().on(UPSTREAM_ARGS, false, "");
         let git = git(runner);
-        let result = git.reset_to_upstream(dir());
-        assert!(matches!(result, Err(VcsError::NoUpstream)));
-        // It must not reset when there is no upstream.
+        let result = git.reset_to_remote(dir());
+        assert!(matches!(result, Err(VcsError::NoRemote)));
         assert!(!git.runner.called("reset --hard @{upstream}"));
     }
 
     #[test]
     fn reset_on_a_non_repo_errors() {
         let runner = ScriptedRunner::new().on("rev-parse --is-inside-work-tree", false, "");
-        let result = git(runner).reset_to_upstream(dir());
+        let result = git(runner).reset_to_remote(dir());
         assert!(matches!(result, Err(VcsError::NotARepo(_))));
     }
 
@@ -611,7 +552,7 @@ mod tests {
             git(runner).clone_repo("https://example.test/game.git", Path::new("/games/game"));
         match result {
             Err(VcsError::Command { what, output }) => {
-                assert_eq!(what, "clone");
+                assert_eq!(what, "git clone");
                 assert!(output.contains("not found"));
             }
             other => panic!("expected a command error, got {other:?}"),
