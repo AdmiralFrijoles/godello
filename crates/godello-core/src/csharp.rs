@@ -75,7 +75,7 @@ pub fn build_solutions(
 }
 
 /// Build with the Godot editor. The build flag implies editor mode and needs a
-/// valid project, so headless is not used and quit is added so it exits.
+/// valid project, so quit is added so it exits.
 fn run_godot_build(
     editor: &Path,
     project_dir: &Path,
