@@ -6,6 +6,7 @@
 
 pub mod config;
 pub mod csharp;
+pub mod git;
 pub mod godot_github;
 pub mod install;
 pub mod launch;
@@ -17,6 +18,7 @@ pub mod version;
 
 pub use config::{ConfigError, Paths, ProjectEntry, ProjectList, Settings};
 pub use csharp::{CsharpBuildTool, CsharpError, build_solutions};
+pub use git::{BlockReason, Git, RepoStatus, UpdateOutcome, VcsError, VersionControl};
 pub use godot_github::GodotGitHubRepository;
 pub use install::{Downloader, InstallError, InstallManager, InstalledEngine};
 pub use launch::{
