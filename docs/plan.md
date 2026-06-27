@@ -132,6 +132,8 @@ Reads and tracks projects.
 ### launch
 
 - Launch the editor for a project, or run the project without the editor.
+- Open the editor for a given version with no project. This shows the Godot
+  project manager for that engine, the same as starting Godot on its own.
 - Resolve the project pin to an installed engine. If none matches, return a clear
   error the caller can turn into an install prompt.
 - Run the editor detached so the CLI returns. Run mode can stay attached.
@@ -188,6 +190,7 @@ gdctl remove <version> [--variant mono]    remove an engine
 gdctl list                                 list installed engines
 gdctl list --remote [--pre]                list versions available to install
 gdctl search <text>                        search available versions
+gdctl open <version> [--variant mono]      open the editor for a version, no project
 
 gdctl project add <path>                   add a project, read its pin
 gdctl project list                         list added projects

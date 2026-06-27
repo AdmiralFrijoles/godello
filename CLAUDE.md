@@ -52,6 +52,13 @@ cargo run -p gdctl -- <args>
 - Treat the engine variant (default versus C# Mono) as a first class string
   value, not a bool. Encode it in both the install path and any pin specifier.
 
+## Testing rule
+
+Tests must go beyond the happy path. For any logic worth testing, also cover edge
+cases, error paths, fallbacks, boundary conditions, and malformed or adversarial
+input. A test that only checks success is not enough. The platform and repository
+module tests show the expected style.
+
 ## Decisions
 
 These are settled. See docs/plan.md for the full plan.

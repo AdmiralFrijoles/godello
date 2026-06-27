@@ -5,9 +5,13 @@
 //! versions on disk, and tracking projects with their bound engine version.
 
 pub mod platform;
+pub mod repository;
 pub mod version;
 
 pub use platform::{Arch, Os, PlatformError, Target};
+pub use repository::{
+    Asset, Checksum, ChecksumAlgorithm, EngineRepository, Release, RepositoryError,
+};
 pub use version::{GodotVersion, Stage, Variant, VersionParseError, VersionPattern};
 
 /// Name of the application, shown in user facing output.
