@@ -37,6 +37,19 @@ pub fn pick_project_folder() -> Task<Message> {
     )
 }
 
+/// Open the native folder picker to choose where engines are installed.
+pub fn pick_engine_dir() -> Task<Message> {
+    Task::perform(
+        async {
+            rfd::AsyncFileDialog::new()
+                .pick_folder()
+                .await
+                .map(|handle| handle.path().to_path_buf())
+        },
+        Message::EngineDirPicked,
+    )
+}
+
 /// Open the native folder picker to choose where to clone, carrying the url.
 pub fn pick_clone_destination(url: String) -> Task<Message> {
     Task::perform(

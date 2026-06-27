@@ -7,7 +7,9 @@
 
 use std::path::PathBuf;
 
-use godello_core::{GodotVersion, ProjectEntry, Release, RepoStatus, UpdateOutcome, Variant};
+use godello_core::{
+    CsharpBuildTool, GodotVersion, ProjectEntry, Release, RepoStatus, UpdateOutcome, Variant,
+};
 use iced::Theme;
 
 use crate::gui::progress::ProgressEvent;
@@ -50,6 +52,22 @@ pub enum Message {
     RemoteLoaded(Result<Vec<Release>, String>),
     /// Clear the cached version list.
     ClearCache,
+
+    // Settings.
+    /// Open a folder picker to choose where engines are installed.
+    ChooseEngineDir,
+    /// The engine install folder was picked, or the picker was cancelled.
+    EngineDirPicked(Option<PathBuf>),
+    /// Reset the engine install folder to the default.
+    ResetEngineDir,
+    /// Set the variant used when nothing else says.
+    SetDefaultVariant(Variant),
+    /// Set whether prereleases are included by default.
+    SetIncludePrereleases(bool),
+    /// Set whether the C# solution is built before a launch.
+    SetBuildCsharp(bool),
+    /// Set which tool builds the C# solution.
+    SetCsharpBuildTool(CsharpBuildTool),
 
     /// Switch between the installed and available lists.
     SetEnginesTab(EnginesTab),

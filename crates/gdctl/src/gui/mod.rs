@@ -146,6 +146,43 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
             state.toast(ToastKind::Info, "Cleared the cached version list.");
             Task::none()
         }
+
+        // Settings. Each change applies right away and saves to disk.
+        Message::ChooseEngineDir => tasks::pick_engine_dir(),
+        Message::EngineDirPicked(None) => Task::none(),
+        Message::EngineDirPicked(Some(dir)) => {
+            state.ctx.settings.engine_install_dir = Some(dir);
+            save_settings(state);
+            // The engines now come from a different folder, so reread them.
+            reload_installed(state);
+            Task::none()
+        }
+        Message::ResetEngineDir => {
+            state.ctx.settings.engine_install_dir = None;
+            save_settings(state);
+            reload_installed(state);
+            Task::none()
+        }
+        Message::SetDefaultVariant(variant) => {
+            state.ctx.settings.default_variant = variant;
+            save_settings(state);
+            Task::none()
+        }
+        Message::SetIncludePrereleases(on) => {
+            state.ctx.settings.include_prereleases = on;
+            save_settings(state);
+            Task::none()
+        }
+        Message::SetBuildCsharp(on) => {
+            state.ctx.settings.build_csharp_before_launch = on;
+            save_settings(state);
+            Task::none()
+        }
+        Message::SetCsharpBuildTool(tool) => {
+            state.ctx.settings.csharp_build_tool = tool;
+            save_settings(state);
+            Task::none()
+        }
         Message::RemoteLoaded(Ok(mut releases)) => {
             // Newest first, matching the CLI listing.
             releases.sort_by(|a, b| b.version.cmp(&a.version));
@@ -864,6 +901,14 @@ fn load_remote(state: &mut App, force: bool) -> Task<Message> {
         state.ctx.paths.manifest_cache(),
         force,
     )
+}
+
+/// Save the current settings to disk, reporting a problem as a toast. Called
+/// after each settings change so edits persist right away.
+fn save_settings(state: &mut App) {
+    if let Err(err) = state.ctx.settings.save(&state.ctx.paths.settings_file()) {
+        state.toast(ToastKind::Error, format!("Could not save settings: {err}"));
+    }
 }
 
 /// Re read the installed engines from disk into state. This is a quick local
