@@ -22,8 +22,8 @@ use crate::progress::BarProgress;
 /// Run a parsed command to completion.
 pub async fn dispatch(ctx: &mut Context, command: Command) -> Result<()> {
     match command {
-        Command::Install { version, variant } => install(ctx, version, variant).await,
-        Command::Remove { version, variant } => remove(ctx, version, variant),
+        Command::Install { version, variant } => install(ctx, version, variant.selected()).await,
+        Command::Remove { version, variant } => remove(ctx, version, variant.selected()),
         Command::List { remote, pre } => {
             if remote {
                 list_remote(ctx, pre).await
@@ -32,7 +32,7 @@ pub async fn dispatch(ctx: &mut Context, command: Command) -> Result<()> {
             }
         }
         Command::Search { text } => search(ctx, &text).await,
-        Command::Open { version, variant } => open(ctx, version, variant).await,
+        Command::Open { version, variant } => open(ctx, version, variant.selected()).await,
         Command::Project { command } => project(ctx, command).await,
         Command::Clone { url, dir } => clone(ctx, &url, dir).await,
         Command::Run => run_current(ctx).await,

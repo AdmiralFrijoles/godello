@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use godello_core::{Variant, VersionPattern};
 
 /// Godello engine and project launcher.
@@ -39,18 +39,16 @@ pub enum Command {
         /// The version to install, for example 4.3 or 4.4-rc1.
         #[arg(value_parser = parse_pattern)]
         version: VersionPattern,
-        /// The build flavor, standard or mono. Defaults to the configured one.
-        #[arg(long, value_parser = parse_variant)]
-        variant: Option<Variant>,
+        #[command(flatten)]
+        variant: VariantArg,
     },
     /// Remove an installed engine version.
     Remove {
         /// The version to remove, matched against what is installed.
         #[arg(value_parser = parse_pattern)]
         version: VersionPattern,
-        /// The build flavor, standard or mono. Defaults to the configured one.
-        #[arg(long, value_parser = parse_variant)]
-        variant: Option<Variant>,
+        #[command(flatten)]
+        variant: VariantArg,
     },
     /// List installed engines, or available versions with --remote.
     List {
@@ -71,9 +69,8 @@ pub enum Command {
         /// The version to open, matched against what is installed.
         #[arg(value_parser = parse_pattern)]
         version: VersionPattern,
-        /// The build flavor, standard or mono. Defaults to the configured one.
-        #[arg(long, value_parser = parse_variant)]
-        variant: Option<Variant>,
+        #[command(flatten)]
+        variant: VariantArg,
     },
     /// Manage the projects you have added.
     Project {
@@ -137,6 +134,29 @@ pub enum SettingsCommand {
     Set { key: String, value: String },
 }
 
+/// How a command names the build flavor. Either spelled out with --variant or
+/// the -m shorthand for mono. The two cannot be given together.
+#[derive(Debug, Args)]
+pub struct VariantArg {
+    /// The build flavor, standard or mono. Defaults to the configured one.
+    #[arg(long, value_parser = parse_variant)]
+    variant: Option<Variant>,
+    /// Shorthand for --variant mono.
+    #[arg(short = 'm', long = "mono", conflicts_with = "variant")]
+    mono: bool,
+}
+
+impl VariantArg {
+    /// The variant the user named, or None to fall back to the configured one.
+    pub fn selected(&self) -> Option<Variant> {
+        if self.mono {
+            Some(Variant::Mono)
+        } else {
+            self.variant
+        }
+    }
+}
+
 /// Parse a version requirement, turning the error into a message clap can show.
 fn parse_pattern(text: &str) -> Result<VersionPattern, String> {
     text.parse()
@@ -164,7 +184,7 @@ mod tests {
         match cli.command.unwrap() {
             Command::Install { version, variant } => {
                 assert_eq!(version, "4.3".parse().unwrap());
-                assert_eq!(variant, None);
+                assert_eq!(variant.selected(), None);
             }
             other => panic!("expected install, got {other:?}"),
         }
@@ -176,7 +196,7 @@ mod tests {
         match cli.command.unwrap() {
             Command::Install { version, variant } => {
                 assert_eq!(version, "4.4-rc1".parse().unwrap());
-                assert_eq!(variant, Some(Variant::Mono));
+                assert_eq!(variant.selected(), Some(Variant::Mono));
             }
             other => panic!("expected install, got {other:?}"),
         }
@@ -186,9 +206,36 @@ mod tests {
     fn variant_accepts_the_csharp_alias() {
         let cli = parse(&["gdctl", "remove", "4.3", "--variant", "csharp"]);
         match cli.command.unwrap() {
-            Command::Remove { variant, .. } => assert_eq!(variant, Some(Variant::Mono)),
+            Command::Remove { variant, .. } => assert_eq!(variant.selected(), Some(Variant::Mono)),
             other => panic!("expected remove, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn the_m_shorthand_means_mono() {
+        for command in ["install", "remove", "open"] {
+            let cli = parse(&["gdctl", command, "4.3", "-m"]);
+            let selected = match cli.command.unwrap() {
+                Command::Install { variant, .. } => variant.selected(),
+                Command::Remove { variant, .. } => variant.selected(),
+                Command::Open { variant, .. } => variant.selected(),
+                other => panic!("expected an engine command, got {other:?}"),
+            };
+            assert_eq!(selected, Some(Variant::Mono), "for {command}");
+        }
+        // The long form spells the same thing.
+        let cli = parse(&["gdctl", "install", "4.3", "--mono"]);
+        match cli.command.unwrap() {
+            Command::Install { variant, .. } => assert_eq!(variant.selected(), Some(Variant::Mono)),
+            other => panic!("expected install, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn m_and_variant_together_are_rejected() {
+        let result =
+            Cli::try_parse_from(["gdctl", "install", "4.3", "-m", "--variant", "standard"]);
+        assert!(result.is_err());
     }
 
     #[test]

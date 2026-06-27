@@ -40,6 +40,7 @@ Engines:
 ```sh
 gdctl install 4.3                 # install the newest 4.3 standard build
 gdctl install 4.4-rc1 --variant mono
+gdctl install 4.3 -m              # -m is shorthand for --variant mono
 gdctl list                        # what is installed
 gdctl list --remote --pre         # what is available, including prereleases
 gdctl search 4.3
