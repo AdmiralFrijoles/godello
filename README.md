@@ -67,6 +67,7 @@ and take the safe default, which is handy in scripts and CI.
 Settings:
 
 ```sh
+gdctl settings list                  # every setting and its current value
 gdctl settings get default_variant
 gdctl settings set build_csharp_before_launch false
 ```

@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, anyhow, bail};
 use godello_core::{
     BlockReason, EngineRepository, Git, GodotProject, GodotVersion, LaunchError, ProjectList,
-    RepoStatus, SyncState, SystemCommandRunner, SystemLauncher, Target, UpdateOutcome, Variant,
-    VersionControl, VersionPattern, engine_for_project, find_project_dir, open_editor,
+    RepoStatus, Settings, SyncState, SystemCommandRunner, SystemLauncher, Target, UpdateOutcome,
+    Variant, VersionControl, VersionPattern, engine_for_project, find_project_dir, open_editor,
     open_version, run_project,
 };
 
@@ -401,9 +401,25 @@ async fn clone(ctx: &Context, url: &str, dir: Option<PathBuf>) -> Result<()> {
 
 fn settings(ctx: &mut Context, command: SettingsCommand) -> Result<()> {
     match command {
+        SettingsCommand::List => settings_list(ctx),
         SettingsCommand::Get { key } => settings_get(ctx, &key),
         SettingsCommand::Set { key, value } => settings_set(ctx, &key, &value),
     }
+}
+
+fn settings_list(ctx: &Context) -> Result<()> {
+    for key in Settings::FIELD_NAMES {
+        // Only the engine dir reads back as None, and only while it is unset, so
+        // show the default that is in effect instead of a blank.
+        let value = ctx.settings.get_field(key).unwrap_or_else(|| {
+            format!(
+                "(unset, using {})",
+                ctx.paths.default_engines_dir().display()
+            )
+        });
+        println!("{key:27} {value}");
+    }
+    Ok(())
 }
 
 fn settings_get(ctx: &Context, key: &str) -> Result<()> {

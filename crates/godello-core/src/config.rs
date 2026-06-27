@@ -109,6 +109,17 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// The names of every setting, in a stable order. Used to list them all and
+    /// kept in step with get_field and set_field.
+    pub const FIELD_NAMES: &'static [&'static str] = &[
+        "engine_install_dir",
+        "build_csharp_before_launch",
+        "csharp_build_tool",
+        "include_prereleases",
+        "default_variant",
+        "launch_detached",
+    ];
+
     /// Load settings from a file. A missing file gives the defaults.
     pub fn load(path: &Path) -> Result<Settings, ConfigError> {
         let text = match fs::read_to_string(path) {
@@ -484,6 +495,22 @@ mod tests {
     }
 
     // Get and set by name.
+
+    #[test]
+    fn every_listed_field_is_a_real_setting() {
+        // With the engine dir set, every listed name must read back a value. A
+        // stray or misspelled name would return None and fail here.
+        let settings = Settings {
+            engine_install_dir: Some(PathBuf::from("/x")),
+            ..Settings::default()
+        };
+        for key in Settings::FIELD_NAMES {
+            assert!(
+                settings.get_field(key).is_some(),
+                "{key} should be a readable setting"
+            );
+        }
+    }
 
     #[test]
     fn get_field_reads_each_setting() {

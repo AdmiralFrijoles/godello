@@ -128,6 +128,8 @@ pub enum ProjectCommand {
 /// A settings subcommand.
 #[derive(Debug, Subcommand)]
 pub enum SettingsCommand {
+    /// List every setting and its current value.
+    List,
     /// Read a setting by name.
     Get { key: String },
     /// Change a setting by name.
@@ -323,6 +325,17 @@ mod tests {
             Command::Clone { dir, .. } => assert_eq!(dir, Some(PathBuf::from("mygame"))),
             other => panic!("expected clone, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn settings_list_parses() {
+        let cli = parse(&["gdctl", "settings", "list"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Settings {
+                command: SettingsCommand::List
+            })
+        ));
     }
 
     #[test]
