@@ -5,6 +5,7 @@
 //! versions on disk, and tracking projects with their bound engine version.
 
 pub mod config;
+pub mod csharp;
 pub mod godot_github;
 pub mod install;
 pub mod platform;
@@ -13,6 +14,9 @@ pub mod repository;
 pub mod version;
 
 pub use config::{ConfigError, Paths, ProjectEntry, ProjectList, Settings};
+pub use csharp::{
+    CommandRunner, CsharpBuildTool, CsharpError, SystemCommandRunner, build_solutions,
+};
 pub use godot_github::GodotGitHubRepository;
 pub use install::{Downloader, InstallError, InstallManager, InstalledEngine};
 pub use platform::{Arch, Os, PlatformError, Target};

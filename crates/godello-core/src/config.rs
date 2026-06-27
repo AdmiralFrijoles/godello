@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
+use crate::csharp::CsharpBuildTool;
 use crate::version::Variant;
 
 /// The resolved folders Godello uses. The config dir holds settings. The data dir
@@ -83,6 +84,8 @@ pub struct Settings {
     pub engine_install_dir: Option<PathBuf>,
     /// Build the C# solution before opening the editor.
     pub build_csharp_before_launch: bool,
+    /// Which tool builds the C# solution.
+    pub csharp_build_tool: CsharpBuildTool,
     /// Include rc, beta, and dev releases in remote listings by default.
     pub include_prereleases: bool,
     /// The variant used when a command does not say.
@@ -94,6 +97,7 @@ impl Default for Settings {
         Settings {
             engine_install_dir: None,
             build_csharp_before_launch: true,
+            csharp_build_tool: CsharpBuildTool::Godot,
             include_prereleases: false,
             default_variant: Variant::Standard,
         }
@@ -142,6 +146,7 @@ impl Settings {
                 .as_ref()
                 .map(|path| path.display().to_string()),
             "build_csharp_before_launch" => Some(self.build_csharp_before_launch.to_string()),
+            "csharp_build_tool" => Some(self.csharp_build_tool.to_string()),
             "include_prereleases" => Some(self.include_prereleases.to_string()),
             "default_variant" => Some(self.default_variant.to_string()),
             _ => None,
@@ -161,6 +166,12 @@ impl Settings {
             }
             "build_csharp_before_launch" => {
                 self.build_csharp_before_launch = parse_bool(key, value)?;
+            }
+            "csharp_build_tool" => {
+                self.csharp_build_tool = value.parse().map_err(|_| ConfigError::InvalidValue {
+                    key: key.to_string(),
+                    value: value.to_string(),
+                })?;
             }
             "include_prereleases" => {
                 self.include_prereleases = parse_bool(key, value)?;
@@ -351,9 +362,36 @@ mod tests {
     fn defaults_are_sensible() {
         let settings = Settings::default();
         assert!(settings.build_csharp_before_launch);
+        assert_eq!(settings.csharp_build_tool, CsharpBuildTool::Godot);
         assert!(!settings.include_prereleases);
         assert_eq!(settings.default_variant, Variant::Standard);
         assert_eq!(settings.engine_install_dir, None);
+    }
+
+    #[test]
+    fn csharp_build_tool_round_trips_and_sets() {
+        let dir = scratch("settings-tool");
+        let path = dir.join("settings.toml");
+        let mut settings = Settings::default();
+        settings.set_field("csharp_build_tool", "dotnet").unwrap();
+        assert_eq!(settings.csharp_build_tool, CsharpBuildTool::Dotnet);
+        settings.save(&path).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("csharp_build_tool = \"dotnet\""));
+        assert_eq!(Settings::load(&path).unwrap(), settings);
+        assert_eq!(
+            settings.get_field("csharp_build_tool").as_deref(),
+            Some("dotnet")
+        );
+    }
+
+    #[test]
+    fn csharp_build_tool_rejects_a_bad_value() {
+        let mut settings = Settings::default();
+        assert!(matches!(
+            settings.set_field("csharp_build_tool", "msbuild"),
+            Err(ConfigError::InvalidValue { .. })
+        ));
     }
 
     #[test]

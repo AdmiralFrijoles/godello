@@ -126,8 +126,14 @@ Reads and tracks projects.
 ### csharp
 
 - Decide if a project is a C# project using the project module signals.
-- Before launching the editor for a C# project, run dotnet build on the sln, or on
-  the csproj if there is no sln. Skip when the setting is off.
+- Before launching the editor for a C# project, build the solutions. Two tools are
+  supported and chosen by the csharp_build_tool setting.
+- Godot, the default. Run the editor for the project version with --path, then
+  --build-solutions, then --quit. The build flag implies editor mode and needs a
+  valid project, so headless is not used.
+- dotnet. Run dotnet build on the solution, or the project file if there is no
+  solution. When neither exists there is nothing to build.
+- Skip the whole step when the build_csharp_before_launch setting is off.
 
 ### launch
 
@@ -153,6 +159,8 @@ Settings for milestone 1:
   the current path.
 - build_csharp_before_launch. Build the C# solution before opening the editor.
   Default on.
+- csharp_build_tool. Which tool builds the C# solution, godot or dotnet. Default
+  godot.
 - include_prereleases. Whether remote version lists include rc, beta, and dev by
   default. Default off.
 - default_variant. Standard or Mono when a command does not say. Default Standard.
