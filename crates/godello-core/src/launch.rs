@@ -94,16 +94,22 @@ fn project_variant(project: &GodotProject) -> Variant {
 
 /// Open the editor for a project. Builds the C# solution first when the project
 /// uses C# and the setting is on.
+///
+/// The before_launch hook runs after any build and just before the editor
+/// starts, so a caller can report the build and the launch as separate steps. It
+/// does not run when the build fails.
 pub fn open_editor(
     manager: &InstallManager,
     settings: &Settings,
     project: &GodotProject,
     runner: &impl CommandRunner,
     launcher: &impl Launcher,
+    before_launch: impl FnOnce(),
 ) -> Result<(), LaunchError> {
     let (version, variant) = engine_for_project(manager, project)?;
     let editor = manager.executable(variant, version, false)?;
     maybe_build_csharp(settings, project, &editor, runner)?;
+    before_launch();
     let args = vec![
         OsString::from("--path"),
         project.dir.as_os_str().to_os_string(),
@@ -114,16 +120,21 @@ pub fn open_editor(
 
 /// Run a project without opening the editor. A C# project is still built first so
 /// its assemblies are ready.
+///
+/// The before_launch hook runs after any build and just before the project
+/// starts, the same as in open_editor.
 pub fn run_project(
     manager: &InstallManager,
     settings: &Settings,
     project: &GodotProject,
     runner: &impl CommandRunner,
     launcher: &impl Launcher,
+    before_launch: impl FnOnce(),
 ) -> Result<(), LaunchError> {
     let (version, variant) = engine_for_project(manager, project)?;
     let editor = manager.executable(variant, version, false)?;
     maybe_build_csharp(settings, project, &editor, runner)?;
+    before_launch();
     let args = vec![
         OsString::from("--path"),
         project.dir.as_os_str().to_os_string(),
@@ -417,7 +428,15 @@ mod tests {
         let project = write_project(&proj_dir, PLAIN);
         let runner = FakeRunner::new();
         let launcher = FakeLauncher::new();
-        open_editor(&manager, &Settings::default(), &project, &runner, &launcher).unwrap();
+        open_editor(
+            &manager,
+            &Settings::default(),
+            &project,
+            &runner,
+            &launcher,
+            || {},
+        )
+        .unwrap();
 
         let (_program, args, detached) = launcher.last();
         assert!(args.contains(&OsString::from("--editor")));
@@ -438,7 +457,15 @@ mod tests {
         let project = write_project(&proj_dir, PLAIN);
         let runner = FakeRunner::new();
         let launcher = FakeLauncher::new();
-        run_project(&manager, &Settings::default(), &project, &runner, &launcher).unwrap();
+        run_project(
+            &manager,
+            &Settings::default(),
+            &project,
+            &runner,
+            &launcher,
+            || {},
+        )
+        .unwrap();
 
         let (_program, args, _detached) = launcher.last();
         assert!(args.contains(&OsString::from("--path")));
@@ -478,7 +505,7 @@ mod tests {
             ..Settings::default()
         };
         let launcher = FakeLauncher::new();
-        open_editor(&manager, &settings, &project, &runner, &launcher).unwrap();
+        open_editor(&manager, &settings, &project, &runner, &launcher, || {}).unwrap();
         let (_program, _args, detached) = launcher.last();
         assert!(detached, "the setting should make the launch detached");
     }
@@ -492,8 +519,25 @@ mod tests {
         let project = write_project(&proj_dir, CSHARP);
         let runner = FakeRunner::new();
         let launcher = FakeLauncher::new();
-        open_editor(&manager, &Settings::default(), &project, &runner, &launcher).unwrap();
+        // The hook captures whether the build had already run when it fired, so
+        // this checks the order is build first, then the launch step.
+        let built_before_hook = RefCell::new(false);
+        open_editor(
+            &manager,
+            &Settings::default(),
+            &project,
+            &runner,
+            &launcher,
+            || {
+                *built_before_hook.borrow_mut() = runner.ran();
+            },
+        )
+        .unwrap();
         assert!(runner.ran(), "the C# build should have run");
+        assert!(
+            *built_before_hook.borrow(),
+            "the before launch hook should run after the build"
+        );
         assert_eq!(launcher.count(), 1, "the editor should still launch");
     }
 
@@ -510,7 +554,7 @@ mod tests {
         };
         let runner = FakeRunner::new();
         let launcher = FakeLauncher::new();
-        open_editor(&manager, &settings, &project, &runner, &launcher).unwrap();
+        open_editor(&manager, &settings, &project, &runner, &launcher, || {}).unwrap();
         assert!(!runner.ran(), "the build should be skipped");
         assert_eq!(launcher.count(), 1);
     }
@@ -524,9 +568,21 @@ mod tests {
         let project = write_project(&proj_dir, CSHARP);
         let runner = FakeRunner::failing();
         let launcher = FakeLauncher::new();
-        let result = open_editor(&manager, &Settings::default(), &project, &runner, &launcher);
+        let hook_ran = RefCell::new(false);
+        let result = open_editor(
+            &manager,
+            &Settings::default(),
+            &project,
+            &runner,
+            &launcher,
+            || {
+                *hook_ran.borrow_mut() = true;
+            },
+        );
         assert!(matches!(result, Err(LaunchError::Csharp(_))));
         // The editor must not start when the build failed.
         assert_eq!(launcher.count(), 0);
+        // The before launch hook must not fire when the build failed.
+        assert!(!*hook_ran.borrow());
     }
 }

@@ -353,13 +353,16 @@ async fn edit_project(ctx: &Context, dir: &Path, no_build: bool) -> Result<()> {
         .with_context(|| format!("could not read the project in {}", dir.display()))?;
     ensure_project_engine(ctx, &project).await?;
     let settings = launch_settings(&ctx.settings, no_build);
-    announce_launch(ctx, &settings, &project, "Opening the editor for");
+    announce_build(ctx, &settings, &project);
+    let label = project.name.as_deref().unwrap_or("the project");
+    // The launch message prints after any build, just before the editor starts.
     open_editor(
         &ctx.install_manager(),
         &settings,
         &project,
         &SystemCommandRunner,
         &SystemLauncher,
+        || say!(ctx, "Opening the editor for {label}..."),
     )
     .context("could not open the editor")?;
     Ok(())
@@ -370,13 +373,16 @@ async fn run_project_dir(ctx: &Context, dir: &Path, no_build: bool) -> Result<()
         .with_context(|| format!("could not read the project in {}", dir.display()))?;
     ensure_project_engine(ctx, &project).await?;
     let settings = launch_settings(&ctx.settings, no_build);
-    announce_launch(ctx, &settings, &project, "Running");
+    announce_build(ctx, &settings, &project);
+    let label = project.name.as_deref().unwrap_or("the project");
+    // The launch message prints after any build, just before the project runs.
     run_project(
         &ctx.install_manager(),
         &settings,
         &project,
         &SystemCommandRunner,
         &SystemLauncher,
+        || say!(ctx, "Running {label}..."),
     )
     .context("could not run the project")?;
     Ok(())
@@ -393,14 +399,13 @@ fn launch_settings(base: &Settings, no_build: bool) -> Settings {
     settings
 }
 
-/// Print a short note before a launch, including the C# build step when it will
-/// run, so the user knows what is about to happen before the editor takes over.
-fn announce_launch(ctx: &Context, settings: &Settings, project: &GodotProject, action: &str) {
+/// Print the build note when a launch will build the C# solution first. The
+/// matching launch note is printed afterward by the launch hook, so the two read
+/// in the order they happen.
+fn announce_build(ctx: &Context, settings: &Settings, project: &GodotProject) {
     if settings.build_csharp_before_launch && project.uses_csharp {
         say!(ctx, "Building the C# solution first...");
     }
-    let label = project.name.as_deref().unwrap_or("the project");
-    say!(ctx, "{action} {label}...");
 }
 
 /// Make sure an engine the project can use is installed. When none matches, offer
