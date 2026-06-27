@@ -6,7 +6,7 @@ projects pinned to the version they need. Works on Linux, Windows, and Mac.
 Godello runs as a single binary named gdctl. Use it from the command line for
 everything, or run it with no subcommand to open the desktop app.
 
-Status: early scaffold. Not yet usable.
+Status: the command line core works. The desktop app is not built yet.
 
 ## Features
 
@@ -35,7 +35,43 @@ The binary is built at target/release/gdctl.
 gdctl --help
 ```
 
-Run gdctl with no arguments to open the desktop app.
+Engines:
+
+```sh
+gdctl install 4.3                 # install the newest 4.3 standard build
+gdctl install 4.4-rc1 --variant mono
+gdctl list                        # what is installed
+gdctl list --remote --pre         # what is available, including prereleases
+gdctl search 4.3
+gdctl open 4.3                     # open the editor with no project
+gdctl remove 4.3
+```
+
+Projects:
+
+```sh
+gdctl project add path/to/game
+gdctl project pin path/to/game 4.3   # write the required version into project.godot
+gdctl edit                           # open the editor for the project in this folder
+gdctl run                            # run the project in this folder
+gdctl project status path/to/game    # branch, sync state, local changes
+gdctl project update path/to/game    # bring it up to date with its remote
+gdctl clone https://example.com/game.git
+```
+
+When a command needs an engine version that is not installed, Godello offers to
+install it first. Add --yes (or --non-interactive) to any command to skip prompts
+and take the safe default, which is handy in scripts and CI.
+
+Settings:
+
+```sh
+gdctl settings get default_variant
+gdctl settings set build_csharp_before_launch false
+```
+
+Running gdctl with no arguments will open the desktop app once it exists. For now
+it prints help.
 
 ## License
 

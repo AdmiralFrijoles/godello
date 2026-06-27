@@ -15,6 +15,8 @@ authors = ["Jason Gagner <gagner.jason@pm.me>"]
 
 [workspace.dependencies]
 godello-core = { path = "crates/godello-core" }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
 directories = "5"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1", features = ["derive"] }

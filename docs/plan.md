@@ -314,8 +314,15 @@ Milestone 3, polish.
 
 ## Open points to revisit
 
-- Exact app data paths per OS once directories is wired in.
 - How much of the Godot website manifest we cache versus query live.
-- Git via the system git command versus a bundled library such as git2. System git
-  is simpler but requires git on the path. To be confirmed before building the git
+- Download progress reporting in the CLI. The downloader trait has no progress
+  hook yet, so an install just prints before and after. A progress bar with
+  indicatif can come once the trait can report bytes.
+
+## Settled since the plan was written
+
+- App data paths per OS are resolved with the directories crate. See the config
   module.
+- Git uses the system git command, run through the shared command runner. It is a
+  clean no op when git is not installed or the folder is not a repo. A bundled
+  library was not needed.
