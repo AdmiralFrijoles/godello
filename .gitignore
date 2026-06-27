@@ -1,0 +1,51 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo.lock is kept for binary crates (this workspace produces a binary),
+# so it is not ignored.
+
+# JetBrains RustRover and IntelliJ.
+# Keep the shared parts of .idea, ignore the per user and per machine bits.
+.idea/**/workspace.xml
+.idea/**/tasks.xml
+.idea/**/usage.statistics.xml
+.idea/**/dictionaries
+.idea/**/shelf
+.idea/**/contentModel.xml
+.idea/**/dataSources/
+.idea/**/dataSources.ids
+.idea/**/dataSources.local.xml
+.idea/**/sqlDataSources.xml
+.idea/**/dynamic.xml
+.idea/**/uiDesigner.xml
+.idea/**/dbnavigator.xml
+.idea/**/gradle.xml
+.idea/**/libraries
+.idea/**/mongoSettings.xml
+.idea/httpRequests/
+.idea/caches/
+.idea/.gitignore
+.idea/modules.xml
+.idea/*.iml
+*.iml
+*.iws
+cmake-build-*/
+
+# OS / editor cruft
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+*~
+*.swp
+*.swo
+
+# Godello local runtime data that might land in-tree during dev
+/.godello/
+*.log

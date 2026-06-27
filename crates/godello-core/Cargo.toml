@@ -1,0 +1,11 @@
+[package]
+name = "godello-core"
+description = "Core library for Godello: Godot engine and project management."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]

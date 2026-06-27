@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/godello-core",
+    "crates/gdctl",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/jason/godello"
+authors = ["Jason Gagner <gagner.jason@pm.me>"]
+
+[workspace.dependencies]
+godello-core = { path = "crates/godello-core" }
+
+# Shared external dependencies are declared here and referenced from each
+# crate with `{ workspace = true }`. Versions are left to the implementation
+# phase so we can pin them deliberately.

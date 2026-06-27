@@ -1,0 +1,16 @@
+[package]
+name = "gdctl"
+description = "Godello: a cross-platform Godot engine and project launcher (CLI + iced GUI)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "gdctl"
+path = "src/main.rs"
+
+[dependencies]
+godello-core = { workspace = true }
