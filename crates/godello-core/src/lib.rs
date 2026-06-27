@@ -4,6 +4,7 @@
 //! discovering and downloading Godot engine versions, managing installed
 //! versions on disk, and tracking projects with their bound engine version.
 
+pub mod config;
 pub mod godot_github;
 pub mod install;
 pub mod platform;
@@ -11,6 +12,7 @@ pub mod project;
 pub mod repository;
 pub mod version;
 
+pub use config::{ConfigError, Paths, ProjectEntry, ProjectList, Settings};
 pub use godot_github::GodotGitHubRepository;
 pub use install::{Downloader, InstallError, InstallManager, InstalledEngine};
 pub use platform::{Arch, Os, PlatformError, Target};

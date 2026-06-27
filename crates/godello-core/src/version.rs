@@ -13,9 +13,14 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::str::FromStr;
 
+use serde::{Deserialize, Serialize};
+
 /// The engine build flavor. Kept as its own value, not a bool, so more flavors
 /// can be added later.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
 pub enum Variant {
     /// The standard build.
     #[default]
