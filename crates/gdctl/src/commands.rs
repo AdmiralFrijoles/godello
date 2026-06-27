@@ -43,7 +43,11 @@ pub async fn dispatch(ctx: &mut Context, command: Command) -> Result<()> {
             }
         }
         Command::Search { text } => search(ctx, &text).await,
-        Command::Open { version, variant } => open(ctx, version, variant.selected()).await,
+        Command::Open {
+            version,
+            variant,
+            detach,
+        } => open(ctx, version, variant.selected(), detach.selected()).await,
         Command::Project { command } => project(ctx, command).await,
         Command::Clone { url, dir } => clone(ctx, &url, dir).await,
         Command::Run { no_build, detach } => run_current(ctx, no_build, detach.selected()).await,
@@ -144,7 +148,12 @@ async fn search(ctx: &Context, text: &str) -> Result<()> {
     Ok(())
 }
 
-async fn open(ctx: &Context, pattern: VersionPattern, variant: Option<Variant>) -> Result<()> {
+async fn open(
+    ctx: &Context,
+    pattern: VersionPattern,
+    variant: Option<Variant>,
+    detached: Option<bool>,
+) -> Result<()> {
     let variant = variant.unwrap_or(ctx.settings.default_variant);
     let installed = installed_versions(ctx, variant)?;
     let version = match pattern.best_match(&installed) {
@@ -168,11 +177,13 @@ async fn open(ctx: &Context, pattern: VersionPattern, variant: Option<Variant>) 
         "Opening the project manager with {variant} {}...",
         version.to_tag()
     );
+    // The project manager has no C# build, so the detached choice applies cleanly.
+    let detached = detached.unwrap_or(ctx.settings.launch_detached);
     open_version(
         &ctx.install_manager(),
         version,
         variant,
-        ctx.settings.launch_detached,
+        detached,
         &SystemLauncher,
     )
     .context("could not open the editor")?;

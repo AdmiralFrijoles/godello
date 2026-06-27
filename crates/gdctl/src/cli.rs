@@ -76,6 +76,8 @@ pub enum Command {
         version: VersionPattern,
         #[command(flatten)]
         variant: VariantArg,
+        #[command(flatten)]
+        detach: DetachArg,
     },
     /// Manage the projects you have added.
     Project {
@@ -507,6 +509,26 @@ mod tests {
                 command: ProjectCommand::Run { detach, .. },
             } => assert_eq!(detach.selected(), Some(true)),
             other => panic!("expected project run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_takes_a_detached_override_alongside_the_variant() {
+        let cli = parse(&["gdctl", "open", "4.3", "-m", "--attached"]);
+        match cli.command.unwrap() {
+            Command::Open {
+                variant, detach, ..
+            } => {
+                assert_eq!(variant.selected(), Some(Variant::Mono));
+                assert_eq!(detach.selected(), Some(false));
+            }
+            other => panic!("expected open, got {other:?}"),
+        }
+        // With neither override, open falls back to the configured default.
+        let cli = parse(&["gdctl", "open", "4.3"]);
+        match cli.command.unwrap() {
+            Command::Open { detach, .. } => assert_eq!(detach.selected(), None),
+            other => panic!("expected open, got {other:?}"),
         }
     }
 }

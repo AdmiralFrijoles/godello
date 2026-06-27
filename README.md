@@ -44,7 +44,7 @@ gdctl install 4.3 -m              # -m is shorthand for --variant mono
 gdctl list                        # what is installed
 gdctl list --remote --pre         # what is available, including prereleases
 gdctl search 4.3
-gdctl open 4.3                     # open the editor with no project
+gdctl open 4.3                     # open the editor with no project (takes --detached too)
 gdctl remove 4.3
 ```
 

@@ -156,6 +156,10 @@ pub fn open_version(
     launcher.launch(editor.as_os_str(), &args, detached)
 }
 
+/// Build the C# solution when the project needs it and the setting is on. The
+/// build always runs through the command runner, which waits for it to finish,
+/// so it is never detached. The detached setting only applies to the launch that
+/// follows, so a build always completes before a detached editor starts.
 fn maybe_build_csharp(
     settings: &Settings,
     project: &GodotProject,
