@@ -5,8 +5,8 @@
 //! so the whole app restyles when the theme changes.
 //!
 //! The palettes follow current practice for tool interfaces. The neutrals carry
-//! a slight cool blue undertone rather than flat grey, the dark base is a near
-//! black and the light base a near white rather than pure black or white, the
+//! a slight cool blue undertone rather than flat grey, the dark base is a soft
+//! dark grey and the light base a near white rather than pure black or white, the
 //! text is an off white or a soft near black, and the accent is a calm indigo.
 //! The status colors are desaturated so they read as cues, not alarms.
 
@@ -15,11 +15,11 @@ use std::sync::LazyLock;
 use iced::theme::Palette;
 use iced::{Color, Theme};
 
-/// The dark palette. A near black cool grey base, off white text, and a calm
+/// The dark palette. A soft dark cool grey base, off white text, and a calm
 /// indigo accent. iced lightens the base in small steps for the raised surfaces.
 fn dark_palette() -> Palette {
     Palette {
-        background: Color::from_rgb8(0x10, 0x11, 0x13),
+        background: Color::from_rgb8(0x1c, 0x1e, 0x24),
         text: Color::from_rgb8(0xed, 0xee, 0xf0),
         primary: Color::from_rgb8(0x6e, 0x7b, 0xe8),
         success: Color::from_rgb8(0x30, 0xa4, 0x6c),

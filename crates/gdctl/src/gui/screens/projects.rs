@@ -88,8 +88,8 @@ fn project_row<'a>(state: &'a App, entry: &'a ProjectEntry) -> Element<'a, Messa
                 badges = badges.push(pill("C#"));
             }
             if let Some(status) = state.git_status.get(&entry.path) {
-                let (label, warn, tip) = git_label(status);
-                badges = badges.push(git_badge(label, warn, tip));
+                let (label, tone, tip) = git_label(status);
+                badges = badges.push(git_badge(label, tone, tip));
             }
         }
         None => {
@@ -234,34 +234,40 @@ fn engine_badge<'a>(project: &GodotProject) -> Element<'a, Message> {
     }
 }
 
-/// A short version control status: the badge label, whether it wants attention,
-/// and a plain English explanation for the tooltip. Local changes warn. Whether
-/// there is an upstream is not reported.
-fn git_label(status: &RepoStatus) -> (&'static str, bool, &'static str) {
+/// A short version control status: the badge label, the tone that colors it, and
+/// a plain English explanation for the tooltip. Whether there is an upstream is
+/// not reported.
+fn git_label(status: &RepoStatus) -> (&'static str, style::BadgeTone, &'static str) {
     if status.has_local_changes {
         return (
             "changes",
-            true,
+            style::BadgeTone::Warning,
             "You have changes that are not saved to version control yet.",
         );
     }
     match status.sync {
-        SyncState::Behind { .. } => ("behind", false, "Updates are available to download."),
+        SyncState::Behind { .. } => (
+            "behind",
+            style::BadgeTone::Info,
+            "Updates are available to download.",
+        ),
         SyncState::Ahead { .. } => (
             "ahead",
-            false,
+            style::BadgeTone::Info,
             "You have changes that have not been uploaded yet.",
         ),
         SyncState::Diverged => (
             "diverged",
-            false,
+            style::BadgeTone::Danger,
             "Your copy and the online copy have both changed.",
         ),
         // We do not care whether there is an upstream, so with no local changes
-        // these all read as clean.
-        SyncState::UpToDate | SyncState::NoRemote | SyncState::Unknown => {
-            ("clean", false, "Everything is up to date.")
-        }
+        // these all read as up to date.
+        SyncState::UpToDate | SyncState::NoRemote | SyncState::Unknown => (
+            "clean",
+            style::BadgeTone::Success,
+            "Everything is up to date.",
+        ),
     }
 }
 
@@ -274,15 +280,15 @@ fn pill<'a>(label: impl Into<String>) -> Element<'a, Message> {
 }
 
 /// The joined git badge: a "git" pill flush against a status pill, so the pair
-/// reads as one. The status half warns when there are local changes. Hovering the
-/// pair shows a plain English explanation of the status.
-fn git_badge<'a>(status: &'a str, warning: bool, tip: &'a str) -> Element<'a, Message> {
+/// reads as one. The status half is colored by its tone, so the two tone pair is
+/// always visible. Hovering the pair shows a plain English explanation.
+fn git_badge<'a>(status: &'a str, tone: style::BadgeTone, tip: &'a str) -> Element<'a, Message> {
     let left = container(text("git").size(style::TEXT_CAPTION))
         .padding([2.0, style::GAP_S])
         .style(style::badge_left);
     let right = container(text(status).size(style::TEXT_CAPTION))
         .padding([2.0, style::GAP_S])
-        .style(style::badge_right(warning));
+        .style(style::badge_right(tone));
     let pair = row![left, right];
 
     tooltip(

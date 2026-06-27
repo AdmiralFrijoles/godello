@@ -121,15 +121,32 @@ pub fn badge_left(theme: &Theme) -> container::Style {
     }
 }
 
+/// Which palette color tints the right half of a status pill. Every status picks
+/// one of these, none of them the neutral of the left half, so the two tone pair
+/// is always visible.
+#[derive(Debug, Clone, Copy)]
+pub enum BadgeTone {
+    /// A calm informational state, the accent color.
+    Info,
+    /// A good state, such as up to date.
+    Success,
+    /// A state that wants attention, such as local changes.
+    Warning,
+    /// A state that needs care, such as a diverged history.
+    Danger,
+}
+
 /// The right half of a joined pill pair. Only the right corners are rounded. The
-/// warning flag tints it for a state that wants attention.
-pub fn badge_right(warning: bool) -> impl Fn(&Theme) -> container::Style {
+/// tone tints it so each status reads as its own color, distinct from the neutral
+/// left half.
+pub fn badge_right(tone: BadgeTone) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
         let palette = theme.extended_palette();
-        let pair = if warning {
-            palette.warning.weak
-        } else {
-            palette.secondary.weak
+        let pair = match tone {
+            BadgeTone::Info => palette.primary.weak,
+            BadgeTone::Success => palette.success.weak,
+            BadgeTone::Warning => palette.warning.weak,
+            BadgeTone::Danger => palette.danger.weak,
         };
         container::Style {
             background: Some(pair.color.into()),
