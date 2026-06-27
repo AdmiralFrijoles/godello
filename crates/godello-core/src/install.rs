@@ -25,12 +25,39 @@ pub struct InstalledEngine {
     pub path: PathBuf,
 }
 
-/// Fetches a url to a local path. The binary supplies a real client. Tests
-/// supply a fake one. Kept separate from the text HttpClient because engine
-/// downloads are binary and large.
+/// Receives download progress as bytes arrive. The total is optional because a
+/// server may not send a content length. Every method takes a shared reference
+/// so one sink can be passed through a download by reference.
+pub trait DownloadProgress {
+    /// Called once before any bytes, with the total size when it is known.
+    fn start(&self, total: Option<u64>);
+    /// Called as bytes arrive, with the running total downloaded so far.
+    fn update(&self, downloaded: u64);
+    /// Called once when the download ends, whether it finished or failed.
+    fn finish(&self);
+}
+
+/// A progress sink that ignores every update. Used when no display is wanted,
+/// for example in tests or a quiet run.
+pub struct NoProgress;
+
+impl DownloadProgress for NoProgress {
+    fn start(&self, _total: Option<u64>) {}
+    fn update(&self, _downloaded: u64) {}
+    fn finish(&self) {}
+}
+
+/// Fetches a url to a local path, reporting progress as it goes. The binary
+/// supplies a real client. Tests supply a fake one. Kept separate from the text
+/// HttpClient because engine downloads are binary and large.
 #[allow(async_fn_in_trait)]
 pub trait Downloader {
-    async fn download_to(&self, url: &str, dest: &Path) -> Result<(), InstallError>;
+    async fn download_to(
+        &self,
+        url: &str,
+        dest: &Path,
+        progress: &dyn DownloadProgress,
+    ) -> Result<(), InstallError>;
 }
 
 /// Manages the on disk set of installed engines.
@@ -127,6 +154,7 @@ impl InstallManager {
         variant: Variant,
         version: GodotVersion,
         downloader: &D,
+        progress: &dyn DownloadProgress,
     ) -> Result<InstalledEngine, InstallError> {
         let target_dir = self.install_dir(variant, version);
         if target_dir.exists() {
@@ -137,7 +165,9 @@ impl InstallManager {
         let archive_path = self.downloads_dir.join(&asset.file_name);
         let partial_path = with_added_extension(&archive_path, "partial");
 
-        downloader.download_to(&asset.url, &partial_path).await?;
+        downloader
+            .download_to(&asset.url, &partial_path, progress)
+            .await?;
 
         if let Some(checksum) = &asset.checksum {
             verify_file(&partial_path, checksum)?;
@@ -455,12 +485,43 @@ mod tests {
     }
 
     impl Downloader for FakeDownloader {
-        async fn download_to(&self, _url: &str, dest: &Path) -> Result<(), InstallError> {
+        async fn download_to(
+            &self,
+            _url: &str,
+            dest: &Path,
+            progress: &dyn DownloadProgress,
+        ) -> Result<(), InstallError> {
             if self.fail {
                 return Err(InstallError::Download("boom".to_string()));
             }
+            let total = self.data.len() as u64;
+            progress.start(Some(total));
             fs::write(dest, &self.data)?;
+            progress.update(total);
+            progress.finish();
             Ok(())
+        }
+    }
+
+    /// A progress sink that records the calls it received, to check forwarding.
+    #[derive(Default)]
+    struct RecordingProgress {
+        started: std::cell::Cell<bool>,
+        total: std::cell::Cell<Option<u64>>,
+        last: std::cell::Cell<u64>,
+        finished: std::cell::Cell<bool>,
+    }
+
+    impl DownloadProgress for RecordingProgress {
+        fn start(&self, total: Option<u64>) {
+            self.started.set(true);
+            self.total.set(total);
+        }
+        fn update(&self, downloaded: u64) {
+            self.last.set(downloaded);
+        }
+        fn finish(&self) {
+            self.finished.set(true);
         }
     }
 
@@ -690,7 +751,8 @@ mod tests {
         };
         let version = stable(4, 3, 0);
         let engine =
-            block_on(manager.install(&asset, Variant::Standard, version, &downloader)).unwrap();
+            block_on(manager.install(&asset, Variant::Standard, version, &downloader, &NoProgress))
+                .unwrap();
 
         assert_eq!(engine.version, version);
         assert!(engine.path.join("Godot_v4.3-stable_linux.x86_64").is_file());
@@ -719,7 +781,8 @@ mod tests {
             data: linux_zip_bytes(),
             fail: false,
         };
-        let result = block_on(manager.install(&asset, Variant::Standard, version, &downloader));
+        let result =
+            block_on(manager.install(&asset, Variant::Standard, version, &downloader, &NoProgress));
         assert!(matches!(result, Err(InstallError::AlreadyInstalled { .. })));
     }
 
@@ -738,9 +801,36 @@ mod tests {
             fail: false,
         };
         let version = stable(4, 3, 0);
-        let result = block_on(manager.install(&asset, Variant::Standard, version, &downloader));
+        let result =
+            block_on(manager.install(&asset, Variant::Standard, version, &downloader, &NoProgress));
         assert!(matches!(result, Err(InstallError::ChecksumMismatch { .. })));
         assert!(!manager.is_installed(Variant::Standard, version));
+    }
+
+    #[test]
+    fn install_forwards_progress_to_the_sink() {
+        let root = scratch("install-progress-root");
+        let downloads = scratch("install-progress-dl");
+        let manager = InstallManager::new(&root, &downloads);
+        let bytes = linux_zip_bytes();
+        let total = bytes.len() as u64;
+        let asset = Asset {
+            file_name: "Godot.zip".to_string(),
+            url: "https://dl.test/godot.zip".to_string(),
+            checksum: None,
+        };
+        let downloader = FakeDownloader {
+            data: bytes,
+            fail: false,
+        };
+        let progress = RecordingProgress::default();
+        let version = stable(4, 3, 0);
+        block_on(manager.install(&asset, Variant::Standard, version, &downloader, &progress))
+            .unwrap();
+        assert!(progress.started.get());
+        assert_eq!(progress.total.get(), Some(total));
+        assert_eq!(progress.last.get(), total);
+        assert!(progress.finished.get());
     }
 
     #[test]
@@ -758,7 +848,8 @@ mod tests {
             fail: true,
         };
         let version = stable(4, 3, 0);
-        let result = block_on(manager.install(&asset, Variant::Standard, version, &downloader));
+        let result =
+            block_on(manager.install(&asset, Variant::Standard, version, &downloader, &NoProgress));
         assert!(matches!(result, Err(InstallError::Download(_))));
         assert!(!manager.is_installed(Variant::Standard, version));
     }

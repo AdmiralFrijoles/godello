@@ -17,6 +17,7 @@ use godello_core::{
 
 use crate::cli::{Command, ProjectCommand, SettingsCommand};
 use crate::context::Context;
+use crate::progress::BarProgress;
 
 /// Run a parsed command to completion.
 pub async fn dispatch(ctx: &mut Context, command: Command) -> Result<()> {
@@ -166,8 +167,9 @@ async fn install_version(ctx: &Context, variant: Variant, version: GodotVersion)
         .await
         .with_context(|| format!("no download for {variant} {}", version.to_tag()))?;
     println!("Downloading {variant} {}...", version.to_tag());
+    let progress = BarProgress::new(format!("{variant} {}", version.to_tag()));
     manager
-        .install(&asset, variant, version, ctx.client())
+        .install(&asset, variant, version, ctx.client(), &progress)
         .await?;
     println!("Installed {variant} {}", version.to_tag());
     Ok(())

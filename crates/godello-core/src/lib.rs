@@ -21,7 +21,9 @@ pub use config::{ConfigError, Paths, ProjectEntry, ProjectList, Settings};
 pub use csharp::{CsharpBuildTool, CsharpError, build_solutions};
 pub use git::Git;
 pub use godot_github::GodotGitHubRepository;
-pub use install::{Downloader, InstallError, InstallManager, InstalledEngine};
+pub use install::{
+    DownloadProgress, Downloader, InstallError, InstallManager, InstalledEngine, NoProgress,
+};
 pub use launch::{
     LaunchError, Launcher, SystemLauncher, engine_for_project, open_editor, open_version,
     run_project,

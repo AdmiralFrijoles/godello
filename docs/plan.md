@@ -315,9 +315,6 @@ Milestone 3, polish.
 ## Open points to revisit
 
 - How much of the Godot website manifest we cache versus query live.
-- Download progress reporting in the CLI. The downloader trait has no progress
-  hook yet, so an install just prints before and after. A progress bar with
-  indicatif can come once the trait can report bytes.
 
 ## Settled since the plan was written
 
@@ -326,3 +323,6 @@ Milestone 3, polish.
 - Git uses the system git command, run through the shared command runner. It is a
   clean no op when git is not installed or the folder is not a repo. A bundled
   library was not needed.
+- Download progress reporting is done. The downloader trait reports bytes through
+  a DownloadProgress sink, and the CLI draws a bar with indicatif. The bar stays
+  hidden when stderr is not a terminal, so it never spams a log or a CI job.

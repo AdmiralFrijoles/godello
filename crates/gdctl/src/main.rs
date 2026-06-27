@@ -9,6 +9,7 @@ mod commands;
 mod context;
 mod interaction;
 mod net;
+mod progress;
 
 use clap::{CommandFactory, Parser};
 
