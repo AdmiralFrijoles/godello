@@ -9,15 +9,26 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use godello_core::{
-    BlockReason, EngineRepository, Git, GodotProject, GodotVersion, LaunchError, ProjectList,
-    RepoStatus, Settings, SyncState, SystemCommandRunner, SystemLauncher, Target, UpdateOutcome,
-    Variant, VersionControl, VersionPattern, engine_for_project, find_project_dir, open_editor,
-    open_version, run_project,
+    BlockReason, EngineRepository, Git, GodotProject, GodotVersion, LaunchError, NoProgress,
+    ProjectList, RepoStatus, Settings, SyncState, SystemCommandRunner, SystemLauncher, Target,
+    UpdateOutcome, Variant, VersionControl, VersionPattern, engine_for_project, find_project_dir,
+    open_editor, open_version, run_project,
 };
 
 use crate::cli::{Command, ProjectCommand, SettingsCommand};
 use crate::context::Context;
 use crate::progress::BarProgress;
+
+/// Print a line to stdout unless the run is silent. Errors still reach stderr
+/// through the normal error path, so silent only hides the status output. The
+/// message is not even built when silent, so this is cheap to leave in place.
+macro_rules! say {
+    ($ctx:expr, $($arg:tt)*) => {
+        if !$ctx.silent {
+            println!($($arg)*);
+        }
+    };
+}
 
 /// Run a parsed command to completion.
 pub async fn dispatch(ctx: &mut Context, command: Command) -> Result<()> {
@@ -45,6 +56,7 @@ pub async fn dispatch(ctx: &mut Context, command: Command) -> Result<()> {
 
 async fn install(ctx: &Context, pattern: VersionPattern, variant: Option<Variant>) -> Result<()> {
     let variant = variant.unwrap_or(ctx.settings.default_variant);
+    say!(ctx, "Finding a {variant} build for {pattern}...");
     let release = ctx
         .repository()
         .resolve(pattern, variant, ctx.settings.include_prereleases)
@@ -61,34 +73,41 @@ fn remove(ctx: &Context, pattern: VersionPattern, variant: Option<Variant>) -> R
         .best_match(&installed)
         .ok_or_else(|| anyhow!("no installed {variant} engine matches {pattern}"))?;
     manager.remove(variant, version)?;
-    println!("Removed {variant} {}", version.to_tag());
+    say!(ctx, "Removed {variant} {}", version.to_tag());
     Ok(())
 }
 
 fn list_local(ctx: &Context) -> Result<()> {
     let mut engines = ctx.install_manager().list_installed()?;
     if engines.is_empty() {
-        println!("No engines installed.");
+        say!(ctx, "No engines installed.");
         return Ok(());
     }
     engines.sort_by(|a, b| a.variant.cmp(&b.variant).then(a.version.cmp(&b.version)));
     for engine in engines {
-        println!("{:9} {}", engine.variant.as_str(), engine.version.to_tag());
+        say!(
+            ctx,
+            "{:9} {}",
+            engine.variant.as_str(),
+            engine.version.to_tag()
+        );
     }
     Ok(())
 }
 
 async fn list_remote(ctx: &Context, pre: bool) -> Result<()> {
     let include = pre || ctx.settings.include_prereleases;
+    say!(ctx, "Fetching the available versions...");
     let mut releases = ctx.repository().list_releases(include).await?;
     if releases.is_empty() {
-        println!("No versions available.");
+        say!(ctx, "No versions available.");
         return Ok(());
     }
     // Newest first reads best for a human scanning the list.
     releases.sort_by(|a, b| b.version.cmp(&a.version));
     for release in releases {
-        println!(
+        say!(
+            ctx,
             "{:14} ({})",
             release.version.to_tag(),
             variant_list(&release.variants)
@@ -99,6 +118,7 @@ async fn list_remote(ctx: &Context, pre: bool) -> Result<()> {
 
 async fn search(ctx: &Context, text: &str) -> Result<()> {
     // A search is an explicit ask, so it always looks at prereleases too.
+    say!(ctx, "Searching the available versions...");
     let mut releases = ctx.repository().list_releases(true).await?;
     let needle = text.to_ascii_lowercase();
     releases.retain(|release| {
@@ -109,12 +129,13 @@ async fn search(ctx: &Context, text: &str) -> Result<()> {
             .contains(&needle)
     });
     if releases.is_empty() {
-        println!("No versions match {text}.");
+        say!(ctx, "No versions match {text}.");
         return Ok(());
     }
     releases.sort_by(|a, b| b.version.cmp(&a.version));
     for release in releases {
-        println!(
+        say!(
+            ctx,
             "{:14} ({})",
             release.version.to_tag(),
             variant_list(&release.variants)
@@ -142,6 +163,11 @@ async fn open(ctx: &Context, pattern: VersionPattern, variant: Option<Variant>) 
             release.version
         }
     };
+    say!(
+        ctx,
+        "Opening the project manager with {variant} {}...",
+        version.to_tag()
+    );
     open_version(
         &ctx.install_manager(),
         version,
@@ -157,7 +183,7 @@ async fn open(ctx: &Context, pattern: VersionPattern, variant: Option<Variant>) 
 async fn install_version(ctx: &Context, variant: Variant, version: GodotVersion) -> Result<()> {
     let manager = ctx.install_manager();
     if manager.is_installed(variant, version) {
-        println!("{variant} {} is already installed.", version.to_tag());
+        say!(ctx, "{variant} {} is already installed.", version.to_tag());
         return Ok(());
     }
     let target = Target::current(variant);
@@ -166,12 +192,20 @@ async fn install_version(ctx: &Context, variant: Variant, version: GodotVersion)
         .asset(version, target)
         .await
         .with_context(|| format!("no download for {variant} {}", version.to_tag()))?;
-    println!("Downloading {variant} {}...", version.to_tag());
-    let progress = BarProgress::new(format!("{variant} {}", version.to_tag()));
-    manager
-        .install(&asset, variant, version, ctx.client(), &progress)
-        .await?;
-    println!("Installed {variant} {}", version.to_tag());
+    say!(ctx, "Downloading {variant} {}...", version.to_tag());
+    // A silent run shows no bar either. The bar draws to stderr, but silent means
+    // quiet, so swap in the sink that reports nothing.
+    if ctx.silent {
+        manager
+            .install(&asset, variant, version, ctx.client(), &NoProgress)
+            .await?;
+    } else {
+        let progress = BarProgress::new(format!("{variant} {}", version.to_tag()));
+        manager
+            .install(&asset, variant, version, ctx.client(), &progress)
+            .await?;
+    }
+    say!(ctx, "Installed {variant} {}", version.to_tag());
     Ok(())
 }
 
@@ -181,7 +215,7 @@ async fn project(ctx: &mut Context, command: ProjectCommand) -> Result<()> {
     match command {
         ProjectCommand::Add { path } => project_add(ctx, &path),
         ProjectCommand::List => project_list(ctx),
-        ProjectCommand::Pin { path, version } => project_pin(&path, version),
+        ProjectCommand::Pin { path, version } => project_pin(ctx, &path, version),
         ProjectCommand::Edit { path } => {
             let dir = existing_dir(&path)?;
             edit_project(ctx, &dir).await
@@ -191,7 +225,7 @@ async fn project(ctx: &mut Context, command: ProjectCommand) -> Result<()> {
             run_project_dir(ctx, &dir).await
         }
         ProjectCommand::Remove { path } => project_remove(ctx, &path),
-        ProjectCommand::Status { path } => project_status(&path),
+        ProjectCommand::Status { path } => project_status(ctx, &path),
         ProjectCommand::Update { path, reset } => project_update(ctx, &path, reset),
     }
 }
@@ -206,9 +240,9 @@ fn project_add(ctx: &Context, path: &Path) -> Result<()> {
     list.save(&file)?;
     let label = project.name.as_deref().unwrap_or("project");
     if added {
-        println!("Added {label} at {}", dir.display());
+        say!(ctx, "Added {label} at {}", dir.display());
     } else {
-        println!("Updated {label} at {}", dir.display());
+        say!(ctx, "Updated {label} at {}", dir.display());
     }
     Ok(())
 }
@@ -216,21 +250,21 @@ fn project_add(ctx: &Context, path: &Path) -> Result<()> {
 fn project_list(ctx: &Context) -> Result<()> {
     let list = ProjectList::load(&ctx.paths.projects_file())?;
     if list.is_empty() {
-        println!("No projects added.");
+        say!(ctx, "No projects added.");
         return Ok(());
     }
     for entry in list.entries() {
         let name = entry.name.as_deref().unwrap_or("(unnamed)");
-        println!("{name}  {}", entry.path.display());
+        say!(ctx, "{name}  {}", entry.path.display());
     }
     Ok(())
 }
 
-fn project_pin(path: &Path, version: VersionPattern) -> Result<()> {
+fn project_pin(ctx: &Context, path: &Path, version: VersionPattern) -> Result<()> {
     let dir = existing_dir(path)?;
     GodotProject::set_pin(&dir, version)
         .with_context(|| format!("could not pin the project in {}", dir.display()))?;
-    println!("Pinned {} to {version}", dir.display());
+    say!(ctx, "Pinned {} to {version}", dir.display());
     Ok(())
 }
 
@@ -241,24 +275,29 @@ fn project_remove(ctx: &Context, path: &Path) -> Result<()> {
     let mut list = ProjectList::load(&file)?;
     if list.remove(&dir) {
         list.save(&file)?;
-        println!("Forgot {}", dir.display());
+        say!(ctx, "Forgot {}", dir.display());
     } else {
-        println!("{} was not in the project list.", dir.display());
+        say!(ctx, "{} was not in the project list.", dir.display());
     }
     Ok(())
 }
 
-fn project_status(path: &Path) -> Result<()> {
+fn project_status(ctx: &Context, path: &Path) -> Result<()> {
     let dir = existing_dir(path)?;
     let git = Git::new(SystemCommandRunner);
     if !git.is_repo(&dir) {
-        println!("{} is not a version control working copy.", dir.display());
+        say!(
+            ctx,
+            "{} is not a version control working copy.",
+            dir.display()
+        );
         return Ok(());
     }
+    say!(ctx, "Checking the working copy against its remote...");
     let status = git
         .status(&dir, true)
         .map_err(|err| anyhow!("could not read the status: {err}"))?;
-    print_status(&status);
+    print_status(ctx, &status);
     Ok(())
 }
 
@@ -279,18 +318,20 @@ fn project_update(ctx: &Context, path: &Path, reset: bool) -> Result<()> {
         if !proceed {
             bail!("reset cancelled");
         }
+        say!(ctx, "Resetting to the tracked remote...");
         git.reset_to_remote(&dir)
             .map_err(|err| anyhow!("could not reset: {err}"))?;
-        println!("Reset to the tracked remote.");
+        say!(ctx, "Reset to the tracked remote.");
         return Ok(());
     }
+    say!(ctx, "Checking the tracked remote for updates...");
     match git
         .update(&dir)
         .map_err(|err| anyhow!("could not update: {err}"))?
     {
-        UpdateOutcome::AlreadyUpToDate => println!("Already up to date."),
-        UpdateOutcome::Advanced => println!("Updated to the latest from the remote."),
-        UpdateOutcome::Blocked(reason) => println!("{}", describe_block(reason)),
+        UpdateOutcome::AlreadyUpToDate => say!(ctx, "Already up to date."),
+        UpdateOutcome::Advanced => say!(ctx, "Updated to the latest from the remote."),
+        UpdateOutcome::Blocked(reason) => say!(ctx, "{}", describe_block(reason)),
     }
     Ok(())
 }
@@ -311,6 +352,7 @@ async fn edit_project(ctx: &Context, dir: &Path) -> Result<()> {
     let project = GodotProject::load(dir)
         .with_context(|| format!("could not read the project in {}", dir.display()))?;
     ensure_project_engine(ctx, &project).await?;
+    announce_launch(ctx, &project, "Opening the editor for");
     open_editor(
         &ctx.install_manager(),
         &ctx.settings,
@@ -326,6 +368,7 @@ async fn run_project_dir(ctx: &Context, dir: &Path) -> Result<()> {
     let project = GodotProject::load(dir)
         .with_context(|| format!("could not read the project in {}", dir.display()))?;
     ensure_project_engine(ctx, &project).await?;
+    announce_launch(ctx, &project, "Running");
     run_project(
         &ctx.install_manager(),
         &ctx.settings,
@@ -335,6 +378,16 @@ async fn run_project_dir(ctx: &Context, dir: &Path) -> Result<()> {
     )
     .context("could not run the project")?;
     Ok(())
+}
+
+/// Print a short note before a launch, including the C# build step when it will
+/// run, so the user knows what is about to happen before the editor takes over.
+fn announce_launch(ctx: &Context, project: &GodotProject, action: &str) {
+    if ctx.settings.build_csharp_before_launch && project.uses_csharp {
+        say!(ctx, "Building the C# solution first...");
+    }
+    let label = project.name.as_deref().unwrap_or("the project");
+    say!(ctx, "{action} {label}...");
 }
 
 /// Make sure an engine the project can use is installed. When none matches, offer
@@ -375,9 +428,10 @@ async fn clone(ctx: &Context, url: &str, dir: Option<PathBuf>) -> Result<()> {
         bail!("{} already exists and is not empty", dest.display());
     }
     let git = Git::new(SystemCommandRunner);
+    say!(ctx, "Cloning {url}...");
     git.clone_repo(url, &dest)
         .map_err(|err| anyhow!("could not clone: {err}"))?;
-    println!("Cloned into {}", dest.display());
+    say!(ctx, "Cloned into {}", dest.display());
 
     // Add it as a project when it has a project.godot. A repo without one is
     // still cloned, it just is not tracked.
@@ -388,10 +442,13 @@ async fn clone(ctx: &Context, url: &str, dir: Option<PathBuf>) -> Result<()> {
             let mut list = ProjectList::load(&file)?;
             list.add(&canonical, project.name.clone());
             list.save(&file)?;
-            println!("Added it to your project list.");
+            say!(ctx, "Added it to your project list.");
         }
         Err(_) => {
-            println!("Note: no project.godot was found, so it was not added as a project.");
+            say!(
+                ctx,
+                "Note: no project.godot was found, so it was not added as a project."
+            );
         }
     }
     Ok(())
@@ -417,20 +474,21 @@ fn settings_list(ctx: &Context) -> Result<()> {
                 ctx.paths.default_engines_dir().display()
             )
         });
-        println!("{key:27} {value}");
+        say!(ctx, "{key:27} {value}");
     }
     Ok(())
 }
 
 fn settings_get(ctx: &Context, key: &str) -> Result<()> {
     if let Some(value) = ctx.settings.get_field(key) {
-        println!("{value}");
+        say!(ctx, "{value}");
         return Ok(());
     }
     // get_field returns None for an unknown key and for an unset engine dir.
     // Tell those two apart so an unset path shows the default in use.
     if key == "engine_install_dir" {
-        println!(
+        say!(
+            ctx,
             "(unset, using {})",
             ctx.paths.default_engines_dir().display()
         );
@@ -443,7 +501,7 @@ fn settings_get(ctx: &Context, key: &str) -> Result<()> {
 fn settings_set(ctx: &mut Context, key: &str, value: &str) -> Result<()> {
     ctx.settings.set_field(key, value)?;
     ctx.settings.save(&ctx.paths.settings_file())?;
-    println!("Set {key} to {value}");
+    say!(ctx, "Set {key} to {value}");
     Ok(())
 }
 
@@ -488,16 +546,17 @@ fn variant_list(variants: &[Variant]) -> String {
 }
 
 /// Print a working copy status in a few lines.
-fn print_status(status: &RepoStatus) {
+fn print_status(ctx: &Context, status: &RepoStatus) {
     match &status.branch {
-        Some(branch) => println!("Branch: {branch}"),
-        None => println!("Branch: (detached)"),
+        Some(branch) => say!(ctx, "Branch: {branch}"),
+        None => say!(ctx, "Branch: (detached)"),
     }
     if let Some(remote) = &status.tracked_remote {
-        println!("Remote: {remote}");
+        say!(ctx, "Remote: {remote}");
     }
-    println!("State: {}", describe_sync(&status.sync));
-    println!(
+    say!(ctx, "State: {}", describe_sync(&status.sync));
+    say!(
+        ctx,
         "Local changes: {}",
         if status.has_local_changes {
             "yes"

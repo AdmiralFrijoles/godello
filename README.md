@@ -64,6 +64,11 @@ When a command needs an engine version that is not installed, Godello offers to
 install it first. Add --yes (or --non-interactive) to any command to skip prompts
 and take the safe default, which is handy in scripts and CI.
 
+Add --silent (-s) to any command to suppress normal output. Errors are still
+shown on stderr and the exit code still tells you what happened, so it suits a
+script that only cares whether a command worked. Silent also turns off prompts
+and takes the safe default for each one.
+
 Settings:
 
 ```sh

@@ -27,6 +27,11 @@ pub struct Cli {
     )]
     pub yes: bool,
 
+    /// Suppress normal output. Errors are still shown on stderr. This also turns
+    /// off prompts and takes the safe default for each one.
+    #[arg(short = 's', long = "silent", global = true)]
+    pub silent: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }

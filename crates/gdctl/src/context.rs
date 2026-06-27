@@ -19,12 +19,14 @@ pub struct Context {
     pub settings: Settings,
     /// True when prompts should be skipped in favor of safe defaults.
     pub yes: bool,
+    /// True when normal output should be suppressed. Errors still show.
+    pub silent: bool,
     client: WebClient,
 }
 
 impl Context {
     /// Resolve folders, load settings, and build the network client.
-    pub fn load(yes: bool) -> Result<Self> {
+    pub fn load(yes: bool, silent: bool) -> Result<Self> {
         let paths = Paths::discover().context("could not resolve the application folders")?;
         let settings =
             Settings::load(&paths.settings_file()).context("could not load the settings")?;
@@ -34,6 +36,7 @@ impl Context {
             paths,
             settings,
             yes,
+            silent,
             client,
         })
     }
@@ -56,8 +59,10 @@ impl Context {
         &self.client
     }
 
-    /// Ask a yes or no question, honoring the non interactive flag.
+    /// Ask a yes or no question, honoring the non interactive flag. A silent run
+    /// never prompts either, since a prompt would print and wait for input, so it
+    /// takes the safe default.
     pub fn confirm(&self, question: &str, default_yes: bool) -> bool {
-        Interaction::new(self.yes).confirm(question, default_yes)
+        Interaction::new(self.yes || self.silent).confirm(question, default_yes)
     }
 }

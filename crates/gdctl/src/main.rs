@@ -36,7 +36,7 @@ async fn run() -> i32 {
         return 0;
     };
 
-    let mut ctx = match Context::load(cli.yes) {
+    let mut ctx = match Context::load(cli.yes, cli.silent) {
         Ok(ctx) => ctx,
         Err(err) => {
             eprintln!("error: {err:#}");
