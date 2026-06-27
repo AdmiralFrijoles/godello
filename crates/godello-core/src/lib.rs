@@ -7,12 +7,14 @@
 pub mod godot_github;
 pub mod install;
 pub mod platform;
+pub mod project;
 pub mod repository;
 pub mod version;
 
 pub use godot_github::GodotGitHubRepository;
 pub use install::{Downloader, InstallError, InstallManager, InstalledEngine};
 pub use platform::{Arch, Os, PlatformError, Target};
+pub use project::{GodotProject, ProjectError, find_project_dir};
 pub use repository::{
     Asset, Checksum, ChecksumAlgorithm, EngineRepository, HttpClient, Release, RepositoryError,
 };
