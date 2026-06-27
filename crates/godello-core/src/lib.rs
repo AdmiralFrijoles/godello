@@ -4,8 +4,11 @@
 //! discovering and downloading Godot engine versions, managing installed
 //! versions on disk, and tracking projects with their bound engine version.
 //!
-//! Nothing of substance lives here yet. This crate is the scaffold for the
-//! coming implementation work.
+//! This is the start of the implementation. See docs/plan.md for the full plan.
+
+pub mod version;
+
+pub use version::{GodotVersion, Stage, Variant, VersionParseError, VersionPattern};
 
 /// Name of the application, shown in user facing output.
 pub const APP_NAME: &str = "Godello";
