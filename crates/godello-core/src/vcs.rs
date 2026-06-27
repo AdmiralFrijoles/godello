@@ -9,6 +9,10 @@ use std::path::{Path, PathBuf};
 
 use crate::process::ProcessError;
 
+/// The branch an update pulls from when a project does not name its own. Most
+/// repositories use this name for the line of work everyone shares.
+pub const DEFAULT_MAIN_BRANCH: &str = "main";
+
 /// How a working copy compares to its tracked remote. Some systems give exact
 /// commit counts and some only give a coarse state, so the counts are optional.
 /// A centralized system can never be Ahead, since its commits go straight to the
@@ -68,12 +72,15 @@ pub enum UpdateOutcome {
 /// Why an update did not happen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockReason {
-    /// The working copy has local changes.
+    /// The working copy has local changes that the update would overwrite.
     LocalChanges,
     /// The local and remote histories diverged, so there is no clean advance.
     Diverged,
     /// There is no tracked remote to update from.
     NoRemote,
+    /// Merging the main branch in would cause conflicts, so the update was rolled
+    /// back and nothing changed.
+    Conflict,
 }
 
 /// The contract for a version control system.
@@ -89,10 +96,12 @@ pub trait VersionControl {
     /// answer is based on what is already known locally.
     fn status(&self, dir: &Path, contact_remote: bool) -> Result<RepoStatus, VcsError>;
 
-    /// Bring the working copy up to date with its remote by a clean advance only.
-    /// Does nothing and reports a block when there are local changes, there is no
-    /// remote, or the histories diverged.
-    fn update(&self, dir: &Path) -> Result<UpdateOutcome, VcsError>;
+    /// Bring the working copy up to date with the main branch. The main branch is
+    /// fetched from the remote and fast forwarded, then merged into the working
+    /// branch. A merge that would conflict is rolled back so nothing changes.
+    /// Reports a block when there is no remote, the main branch cannot fast
+    /// forward, the merge would conflict, or local changes would be overwritten.
+    fn update(&self, dir: &Path, main_branch: &str) -> Result<UpdateOutcome, VcsError>;
 
     /// Force the working copy to match its tracked remote. This loses local
     /// changes and local commits. It is a separate explicit action, never part

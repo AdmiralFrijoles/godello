@@ -34,7 +34,10 @@ pub use project::{GodotProject, ProjectError, find_project_dir};
 pub use repository::{
     Asset, Checksum, ChecksumAlgorithm, EngineRepository, HttpClient, Release, RepositoryError,
 };
-pub use vcs::{BlockReason, RepoStatus, SyncState, UpdateOutcome, VcsError, VersionControl};
+pub use vcs::{
+    BlockReason, DEFAULT_MAIN_BRANCH, RepoStatus, SyncState, UpdateOutcome, VcsError,
+    VersionControl,
+};
 pub use version::{GodotVersion, Stage, Variant, VersionParseError, VersionPattern};
 
 /// Name of the application, shown in user facing output.

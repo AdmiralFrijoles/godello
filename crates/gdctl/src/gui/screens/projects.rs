@@ -10,7 +10,7 @@ use std::path::Path;
 use godello_core::{GodotProject, ProjectEntry, RepoStatus, SyncState};
 use iced::widget::{button, column, container, row, scrollable, space, text, tooltip};
 use iced::{Alignment, Element, Length};
-use iced_aw::{DropDown, drop_down};
+use iced_aw::{DropDown, Spinner, drop_down};
 
 use crate::gui::Message;
 use crate::gui::state::{App, Load};
@@ -116,30 +116,53 @@ fn project_row<'a>(state: &'a App, entry: &'a ProjectEntry) -> Element<'a, Messa
         .offset([0.0, style::GAP_XS])
         .on_dismiss(Message::CloseProjectMenu);
 
-    // Quick actions beside the menu. They are also in the menu.
-    let edit = button(text("Edit"))
-        .padding(style::BTN_PAD)
-        .style(style::button_primary)
-        .on_press(Message::LaunchProject {
-            dir: dir.clone(),
-            run: false,
-        });
-    let run = button(text("Run"))
-        .padding(style::BTN_PAD)
-        .style(style::button_secondary)
-        .on_press(Message::LaunchProject {
-            dir: dir.clone(),
-            run: true,
-        });
+    let mut content = row![name].spacing(style::GAP_S).align_y(Alignment::Center);
 
-    container(
-        row![name, edit, run, menu]
-            .spacing(style::GAP_S)
-            .align_y(Alignment::Center),
-    )
-    .padding(style::GAP_M)
-    .width(Length::Fill)
-    .style(style::card)
+    // When the project is busy, for example installing the engine it needs before
+    // a launch, show that work in place of the launch buttons.
+    match state.project_activity.get(&entry.path) {
+        Some(activity) => {
+            content = content.push(busy_indicator(activity.label()));
+        }
+        None => {
+            // Quick actions beside the menu. They are also in the menu.
+            let edit = button(text("Edit"))
+                .padding(style::BTN_PAD)
+                .style(style::button_primary)
+                .on_press(Message::LaunchProject {
+                    dir: dir.clone(),
+                    run: false,
+                });
+            let run = button(text("Run"))
+                .padding(style::BTN_PAD)
+                .style(style::button_secondary)
+                .on_press(Message::LaunchProject {
+                    dir: dir.clone(),
+                    run: true,
+                });
+            content = content.push(edit).push(run);
+        }
+    }
+    content = content.push(menu);
+
+    container(content)
+        .padding(style::GAP_M)
+        .width(Length::Fill)
+        .style(style::card)
+        .into()
+}
+
+/// A spinner and a short label, shown on a row while it is busy.
+fn busy_indicator<'a>(label: &'a str) -> Element<'a, Message> {
+    row![
+        Spinner::new()
+            .width(Length::Fixed(16.0))
+            .height(Length::Fixed(16.0))
+            .circle_radius(2.0),
+        text(label).size(style::TEXT_BODY),
+    ]
+    .spacing(style::GAP_S)
+    .align_y(Alignment::Center)
     .into()
 }
 

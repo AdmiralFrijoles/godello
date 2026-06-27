@@ -162,6 +162,39 @@ pub struct App {
     pub clone_dialog: Option<CloneDialog>,
     /// A launch to resume once an offered install finishes.
     pub pending_launch: Option<PendingLaunch>,
+    /// A raised warning that an update would touch local changes, if any.
+    pub update_warning: Option<UpdateWarning>,
+    /// What each project row is busy doing, so it can show that work is under way
+    /// instead of its launch buttons. Empty when a project is idle.
+    pub project_activity: HashMap<PathBuf, ProjectActivity>,
+    /// A raised offer to open the editor anyway after a C# build failed, if any.
+    pub compile_warning: Option<CompileWarning>,
+}
+
+/// What a project is busy doing, so its row can show a spinner and a short label
+/// in place of the launch buttons. These follow the order a launch goes through:
+/// install the engine if needed, build the C# solution if the project uses it,
+/// then start the editor or the project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectActivity {
+    /// Installing the engine the project needs before the launch can go ahead.
+    InstallingEngine,
+    /// Building the C# solution before the launch.
+    Compiling,
+    /// Starting the editor or the project, after any install and build.
+    Launching { run: bool },
+}
+
+impl ProjectActivity {
+    /// A short label for the row while this work is under way.
+    pub fn label(self) -> &'static str {
+        match self {
+            ProjectActivity::InstallingEngine => "Installing engine...",
+            ProjectActivity::Compiling => "Compiling C#...",
+            ProjectActivity::Launching { run: true } => "Starting the project...",
+            ProjectActivity::Launching { run: false } => "Opening the editor...",
+        }
+    }
 }
 
 /// One option in the pin dropdown: a version to pin and how to label it.
@@ -210,6 +243,23 @@ pub struct PendingLaunch {
     pub run: bool,
 }
 
+/// A pending update that the user must confirm because the working copy has local
+/// changes. It carries what the update needs so it can run once confirmed.
+#[derive(Debug, Clone)]
+pub struct UpdateWarning {
+    pub dir: PathBuf,
+    pub main_branch: String,
+}
+
+/// A raised offer to open the editor anyway after the C# build failed. Only edits
+/// raise this, since running needs the build. It carries the project to open and
+/// the build error to show.
+#[derive(Debug, Clone)]
+pub struct CompileWarning {
+    pub dir: PathBuf,
+    pub error: String,
+}
+
 impl App {
     /// Build the starting state from the shared context. The theme starts dark
     /// and the available list opens on the released channel.
@@ -237,6 +287,9 @@ impl App {
             install_offer: None,
             clone_dialog: None,
             pending_launch: None,
+            update_warning: None,
+            project_activity: HashMap::new(),
+            compile_warning: None,
         }
     }
 

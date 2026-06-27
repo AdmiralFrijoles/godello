@@ -13,6 +13,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::vcs::DEFAULT_MAIN_BRANCH;
 use crate::version::{Variant, VersionPattern};
 
 /// The file name that marks a Godot project folder.
@@ -33,6 +34,9 @@ pub struct GodotProject {
     pub pinned_version: Option<VersionPattern>,
     /// A version read from the project features, used as a fallback hint.
     pub feature_version: Option<VersionPattern>,
+    /// The main branch an update pulls from, from the godello section. None means
+    /// the default is used.
+    pub main_branch: Option<String>,
 }
 
 impl GodotProject {
@@ -71,7 +75,14 @@ impl GodotProject {
                 .features
                 .iter()
                 .find_map(|f| f.parse::<VersionPattern>().ok()),
+            main_branch: parsed.main_branch,
         })
+    }
+
+    /// The branch an update pulls from and merges in. The godello section can set
+    /// it with main_branch. When unset the common default is used.
+    pub fn main_branch(&self) -> &str {
+        self.main_branch.as_deref().unwrap_or(DEFAULT_MAIN_BRANCH)
     }
 
     /// The engine this project needs, as a version requirement and a variant.
@@ -138,6 +149,7 @@ struct Parsed {
     config_version: Option<u32>,
     features: Vec<String>,
     pinned_version: Option<VersionPattern>,
+    main_branch: Option<String>,
     has_dotnet_section: bool,
     has_mono_section: bool,
 }
@@ -148,6 +160,7 @@ fn parse(content: &str) -> Parsed {
         config_version: None,
         features: Vec::new(),
         pinned_version: None,
+        main_branch: None,
         has_dotnet_section: false,
         has_mono_section: false,
     };
@@ -184,6 +197,12 @@ fn parse(content: &str) -> Parsed {
             }
             (Some("godello"), "pin_version") => {
                 parsed.pinned_version = unquote(value).parse().ok();
+            }
+            (Some("godello"), "main_branch") => {
+                let name = unquote(value);
+                if !name.is_empty() {
+                    parsed.main_branch = Some(name);
+                }
             }
             _ => {}
         }
@@ -347,6 +366,33 @@ run/main_scene="res://main.tscn"
         let project = GodotProject::load(&dir).unwrap();
         let pattern: VersionPattern = "4.3".parse().unwrap();
         assert_eq!(project.feature_version, Some(pattern));
+    }
+
+    #[test]
+    fn main_branch_defaults_when_unset() {
+        let dir = scratch("read-no-branch");
+        write_project(&dir, GODOT4);
+        let project = GodotProject::load(&dir).unwrap();
+        assert_eq!(project.main_branch, None);
+        assert_eq!(project.main_branch(), "main");
+    }
+
+    #[test]
+    fn reads_the_main_branch_override() {
+        let dir = scratch("read-branch");
+        write_project(&dir, "config_version=5\n[godello]\nmain_branch=\"trunk\"\n");
+        let project = GodotProject::load(&dir).unwrap();
+        assert_eq!(project.main_branch.as_deref(), Some("trunk"));
+        assert_eq!(project.main_branch(), "trunk");
+    }
+
+    #[test]
+    fn an_empty_main_branch_override_is_ignored() {
+        let dir = scratch("read-branch-empty");
+        write_project(&dir, "config_version=5\n[godello]\nmain_branch=\"\"\n");
+        let project = GodotProject::load(&dir).unwrap();
+        assert_eq!(project.main_branch, None);
+        assert_eq!(project.main_branch(), "main");
     }
 
     #[test]

@@ -11,16 +11,16 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use godello_core::{
-    EngineRepository, Git, GodotProject, GodotVersion, InstallManager, ProjectEntry, ProjectList,
-    Settings, SystemCommandRunner, SystemLauncher, Target, Variant, VersionControl, VersionPattern,
-    open_editor, run_project,
+    EngineRepository, Git, GodotProject, GodotVersion, InstallManager, LaunchError, ProjectEntry,
+    ProjectList, Settings, SystemCommandRunner, SystemLauncher, Target, Variant, VersionControl,
+    VersionPattern, open_editor, run_project,
 };
 use iced::Task;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::context::Repository;
 use crate::gui::cache;
-use crate::gui::message::Message;
+use crate::gui::message::{LaunchFailure, Message};
 use crate::gui::progress::{ChannelProgress, ProgressEvent};
 use crate::net::WebClient;
 
@@ -58,9 +58,28 @@ pub fn launch_project(
     project: GodotProject,
     run: bool,
 ) -> Task<Message> {
-    Task::perform(
+    let dir = project.dir.clone();
+
+    // The before launch hook fires after any C# build, just before the editor or
+    // project starts. We forward it as a phase message so the row can move from
+    // compiling to starting. The sender drops when the launch finishes, which ends
+    // this stream on its own.
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let phase_dir = dir.clone();
+    let phase = Task::run(UnboundedReceiverStream::new(rx), move |_| {
+        Message::LaunchStarting {
+            dir: phase_dir.clone(),
+            run,
+        }
+    });
+
+    let finish_dir = dir;
+    let launch = Task::perform(
         async move {
-            tokio::task::spawn_blocking(move || {
+            let joined = tokio::task::spawn_blocking(move || {
+                let starting = move || {
+                    let _ = tx.send(());
+                };
                 let result = if run {
                     run_project(
                         &manager,
@@ -68,7 +87,7 @@ pub fn launch_project(
                         &project,
                         &SystemCommandRunner,
                         &SystemLauncher,
-                        || {},
+                        starting,
                     )
                 } else {
                     open_editor(
@@ -77,16 +96,30 @@ pub fn launch_project(
                         &project,
                         &SystemCommandRunner,
                         &SystemLauncher,
-                        || {},
+                        starting,
                     )
                 };
-                result.map_err(|err| err.to_string())
+                // Keep a C# build failure distinct so an edit can offer to open
+                // the editor anyway.
+                result.map_err(|err| match err {
+                    LaunchError::Csharp(err) => LaunchFailure::Compile(err.to_string()),
+                    other => LaunchFailure::Other(other.to_string()),
+                })
             })
-            .await
-            .map_err(|err| err.to_string())?
+            .await;
+            match joined {
+                Ok(result) => result,
+                Err(join) => Err(LaunchFailure::Other(join.to_string())),
+            }
         },
-        Message::LaunchFinished,
-    )
+        move |result| Message::LaunchFinished {
+            dir: finish_dir.clone(),
+            run,
+            result,
+        },
+    );
+
+    Task::batch([phase, launch])
 }
 
 /// Resolve the release a project needs so the install offer can name a version.
@@ -139,14 +172,15 @@ pub fn git_status(dir: PathBuf) -> Task<Message> {
     )
 }
 
-/// Bring a project up to date with its remote, contacting it.
-pub fn update_project(dir: PathBuf) -> Task<Message> {
+/// Bring a project up to date by fetching its main branch and merging it into the
+/// working branch. The main branch can be set per project, otherwise the default.
+pub fn update_project(dir: PathBuf, main_branch: String) -> Task<Message> {
     let for_message = dir.clone();
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
                 Git::new(SystemCommandRunner)
-                    .update(&dir)
+                    .update(&dir, &main_branch)
                     .map_err(|err| err.to_string())
             })
             .await

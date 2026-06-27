@@ -23,8 +23,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use iced::widget::{
-    button, center, column, container, mouse_area, opaque, pick_list, progress_bar, row, space,
-    stack, text, text_input,
+    button, center, column, container, mouse_area, opaque, pick_list, progress_bar, row,
+    scrollable, space, stack, text, text_input,
 };
 use iced::{Alignment, Color, Element, Length, Size, Subscription, Task, Theme};
 
@@ -33,10 +33,11 @@ use godello_core::{
     UpdateOutcome, Variant, VersionPattern, engine_for_project, open_path, open_version,
 };
 
+use message::LaunchFailure;
 pub use message::Message;
 use state::{
-    App, CloneDialog, EnginesTab, InstallOffer, Load, PendingLaunch, PinChoice, PinEditor, Screen,
-    Toast, ToastKind,
+    App, CloneDialog, CompileWarning, EnginesTab, InstallOffer, Load, PendingLaunch, PinChoice,
+    PinEditor, ProjectActivity, Screen, Toast, ToastKind, UpdateWarning,
 };
 
 /// How often the toast timer ticks. About sixty times a second, so the countdown
@@ -242,6 +243,11 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
             state
                 .jobs
                 .retain(|job| !(job.variant == variant && job.version == version));
+            // If a launch was waiting on this install, abandon it and stop showing
+            // the project as working.
+            if let Some(pending) = state.pending_launch.take() {
+                state.project_activity.remove(&pending.dir);
+            }
             state.toast(
                 ToastKind::Info,
                 format!(
@@ -304,7 +310,11 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
                     }
                 }
                 Err(err) => {
-                    state.pending_launch = None;
+                    // The launch that was waiting on this install cannot go ahead,
+                    // so stop showing the project as working.
+                    if let Some(pending) = state.pending_launch.take() {
+                        state.project_activity.remove(&pending.dir);
+                    }
                     state.toast(
                         ToastKind::Error,
                         format!(
@@ -371,9 +381,41 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
             state.project_menu_open = None;
             prepare_launch(state, dir, run)
         }
-        Message::LaunchFinished(Ok(())) => Task::none(),
-        Message::LaunchFinished(Err(err)) => {
-            state.toast(ToastKind::Error, format!("Could not launch: {err}"));
+        Message::LaunchStarting { dir, run } => {
+            // Only move a project that is still shown as working, in case the row
+            // was already cleared.
+            if state.project_activity.contains_key(&dir) {
+                state
+                    .project_activity
+                    .insert(dir, ProjectActivity::Launching { run });
+            }
+            Task::none()
+        }
+        Message::LaunchFinished { dir, run, result } => {
+            state.project_activity.remove(&dir);
+            match result {
+                Ok(()) => {}
+                // A C# build failure on an edit. Offer to open the editor anyway,
+                // so the user can fix the code in the editor.
+                Err(LaunchFailure::Compile(error)) if !run => {
+                    state.compile_warning = Some(CompileWarning { dir, error });
+                }
+                Err(LaunchFailure::Compile(error)) => {
+                    // Running needs the build, so there is nothing to open anyway.
+                    state.toast(ToastKind::Error, format!("Could not build C#: {error}"));
+                }
+                Err(LaunchFailure::Other(error)) => {
+                    state.toast(ToastKind::Error, format!("Could not launch: {error}"));
+                }
+            }
+            Task::none()
+        }
+        Message::EditAnyway => match state.compile_warning.take() {
+            Some(warning) => open_editor_skipping_build(state, warning.dir),
+            None => Task::none(),
+        },
+        Message::CancelCompileWarning => {
+            state.compile_warning = None;
             Task::none()
         }
         Message::OfferResolved {
@@ -404,6 +446,11 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
         }
         Message::AcceptOffer => match state.install_offer.take() {
             Some(offer) => {
+                // Show the project as working through the install and the launch
+                // that follows.
+                state
+                    .project_activity
+                    .insert(offer.dir.clone(), ProjectActivity::InstallingEngine);
                 state.pending_launch = Some(PendingLaunch {
                     dir: offer.dir,
                     run: offer.run,
@@ -413,7 +460,9 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
             None => Task::none(),
         },
         Message::DismissOffer => {
-            state.install_offer = None;
+            if let Some(offer) = state.install_offer.take() {
+                state.project_activity.remove(&offer.dir);
+            }
             Task::none()
         }
 
@@ -481,8 +530,36 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
         }
         Message::UpdateProject(dir) => {
             state.project_menu_open = None;
-            state.toast(ToastKind::Info, "Checking the remote...");
-            tasks::update_project(dir)
+            let main_branch = state
+                .project_info
+                .get(&dir)
+                .map(|project| project.main_branch().to_string())
+                .unwrap_or_else(|| godello_core::DEFAULT_MAIN_BRANCH.to_string());
+            // When there are local changes the merge touches the working copy, so
+            // warn and let the user confirm before doing anything.
+            let has_local_changes = state
+                .git_status
+                .get(&dir)
+                .map(|status| status.has_local_changes)
+                .unwrap_or(false);
+            if has_local_changes {
+                state.update_warning = Some(UpdateWarning { dir, main_branch });
+                Task::none()
+            } else {
+                state.toast(ToastKind::Info, "Checking the remote...");
+                tasks::update_project(dir, main_branch)
+            }
+        }
+        Message::ConfirmUpdate => match state.update_warning.take() {
+            Some(warning) => {
+                state.toast(ToastKind::Info, "Checking the remote...");
+                tasks::update_project(warning.dir, warning.main_branch)
+            }
+            None => Task::none(),
+        },
+        Message::CancelUpdate => {
+            state.update_warning = None;
+            Task::none()
         }
         Message::ProjectUpdated { dir, result } => {
             match result {
@@ -644,6 +721,18 @@ fn prepare_launch(state: &mut App, dir: std::path::PathBuf, run: bool) -> Task<M
     };
     match engine_for_project(&state.ctx.install_manager(), &project) {
         Ok(_) => {
+            // Show what the launch is doing. A C# project builds first, so it
+            // starts on compiling, otherwise it goes straight to starting. The
+            // launch task moves it on to starting once any build is done.
+            let will_build = project.uses_csharp && state.ctx.settings.build_csharp_before_launch;
+            let activity = if will_build {
+                ProjectActivity::Compiling
+            } else {
+                ProjectActivity::Launching { run }
+            };
+            state.project_activity.insert(dir, activity);
+            // The GUI always launches detached so the window stays responsive and
+            // the launched editor or game runs on its own.
             let mut settings = state.ctx.settings.clone();
             settings.launch_detached = true;
             tasks::launch_project(state.ctx.install_manager(), settings, project, run)
@@ -658,6 +747,7 @@ fn prepare_launch(state: &mut App, dir: std::path::PathBuf, run: bool) -> Task<M
                 run,
             ),
             None => {
+                state.project_activity.remove(&dir);
                 state.toast(
                     ToastKind::Error,
                     "This project names no engine version. Pin one first.",
@@ -666,10 +756,35 @@ fn prepare_launch(state: &mut App, dir: std::path::PathBuf, run: bool) -> Task<M
             }
         },
         Err(other) => {
+            state.project_activity.remove(&dir);
             state.toast(ToastKind::Error, format!("Could not launch: {other}"));
             Task::none()
         }
     }
+}
+
+/// Open the editor for a project without building the C# solution first. Used
+/// after the user chooses to edit anyway past a build failure.
+fn open_editor_skipping_build(state: &mut App, dir: std::path::PathBuf) -> Task<Message> {
+    let project = match GodotProject::load(&dir) {
+        Ok(project) => project,
+        Err(err) => {
+            state.toast(
+                ToastKind::Error,
+                format!("Could not read the project: {err}"),
+            );
+            return Task::none();
+        }
+    };
+    state
+        .project_activity
+        .insert(dir, ProjectActivity::Launching { run: false });
+    // Detached as always, and with the build turned off so the editor opens even
+    // though the build failed.
+    let mut settings = state.ctx.settings.clone();
+    settings.launch_detached = true;
+    settings.build_csharp_before_launch = false;
+    tasks::launch_project(state.ctx.install_manager(), settings, project, false)
 }
 
 /// Build the pin dropdown choices for a project, with its detected version
@@ -732,6 +847,9 @@ fn describe_update(outcome: UpdateOutcome) -> &'static str {
             "Not updated. The history has diverged from the remote."
         }
         UpdateOutcome::Blocked(BlockReason::NoRemote) => "Not updated. There is no tracked remote.",
+        UpdateOutcome::Blocked(BlockReason::Conflict) => {
+            "Not updated. Merging the updates in would cause conflicts."
+        }
     }
 }
 
@@ -801,6 +919,13 @@ fn view(state: &App) -> Element<'_, Message> {
             Some((offer_dialog(offer), Message::DismissOffer))
         } else if let Some(editor) = &state.pin_editor {
             Some((pin_dialog(editor), Message::CancelPin))
+        } else if let Some(warning) = &state.update_warning {
+            Some((update_warning_dialog(warning), Message::CancelUpdate))
+        } else if let Some(warning) = &state.compile_warning {
+            Some((
+                compile_warning_dialog(warning),
+                Message::CancelCompileWarning,
+            ))
         } else {
             state
                 .clone_dialog
@@ -912,6 +1037,88 @@ fn offer_dialog<'a>(offer: &InstallOffer) -> Element<'a, Message> {
     )
     .padding(style::GAP_L)
     .max_width(460.0)
+    .style(style::card)
+    .into()
+}
+
+/// The dialog warning that an update will merge into a working copy that has
+/// local changes. The user confirms before anything touches the working copy.
+fn update_warning_dialog<'a>(warning: &UpdateWarning) -> Element<'a, Message> {
+    let actions = row![
+        space::horizontal(),
+        button(text("Cancel"))
+            .padding(style::BTN_PAD)
+            .style(style::button_secondary)
+            .on_press(Message::CancelUpdate),
+        button(text("Update anyway"))
+            .padding(style::BTN_PAD)
+            .style(style::button_primary)
+            .on_press(Message::ConfirmUpdate),
+    ]
+    .spacing(style::GAP_S)
+    .align_y(Alignment::Center);
+
+    container(
+        column![
+            text("Update with local changes?").size(style::TEXT_HEADING),
+            text(format!(
+                "This project has changes that are not saved to version control. \
+                 Updating fetches {} and merges it in, which can touch your changes. \
+                 If it would conflict, the update is rolled back and nothing changes.",
+                warning.main_branch
+            ))
+            .size(style::TEXT_BODY),
+            actions,
+        ]
+        .spacing(style::GAP_M),
+    )
+    .padding(style::GAP_L)
+    .max_width(480.0)
+    .style(style::card)
+    .into()
+}
+
+/// The dialog raised when a C# build fails while opening the editor. It explains
+/// the build failed, shows the build output, and lets the user open the editor
+/// anyway so they can fix the code there.
+fn compile_warning_dialog<'a>(warning: &CompileWarning) -> Element<'a, Message> {
+    let actions = row![
+        space::horizontal(),
+        button(text("Cancel"))
+            .padding(style::BTN_PAD)
+            .style(style::button_secondary)
+            .on_press(Message::CancelCompileWarning),
+        button(text("Open the editor anyway"))
+            .padding(style::BTN_PAD)
+            .style(style::button_primary)
+            .on_press(Message::EditAnyway),
+    ]
+    .spacing(style::GAP_S)
+    .align_y(Alignment::Center);
+
+    // The build output can be long, so it scrolls inside a bounded box.
+    let details = container(
+        scrollable(text(warning.error.clone()).size(style::TEXT_CAPTION)).width(Length::Fill),
+    )
+    .max_height(180.0)
+    .padding(style::GAP_S)
+    .style(style::card);
+
+    container(
+        column![
+            text("C# build failed").size(style::TEXT_HEADING),
+            text(
+                "The C# solution did not build. You can still open the editor to fix the code, \
+                 but the project may not run correctly until the build succeeds."
+            )
+            .size(style::TEXT_BODY),
+            details,
+            actions,
+        ]
+        .spacing(style::GAP_M),
+    )
+    .padding(style::GAP_L)
+    .max_width(560.0)
     .style(style::card)
     .into()
 }

@@ -43,6 +43,11 @@ impl Launcher for SystemLauncher {
         command.args(args);
         // Detached spawns and returns. Attached waits for the editor to close.
         let result = if detached {
+            // Fully cut the launched program loose so it lives on its own. Without
+            // this it shares our process group and standard streams, so when the
+            // launcher exits a terminal hangup or a group signal can also close the
+            // editor. See detach for the per platform details.
+            detach(&mut command);
             command.spawn().map(|_child| ())
         } else {
             command.status().map(|_status| ())
@@ -56,6 +61,42 @@ impl Launcher for SystemLauncher {
         }
     }
 }
+
+/// Set a command up so the spawned program is independent of this process.
+///
+/// On Unix it goes into its own process group, so a signal aimed at our group,
+/// such as a terminal hangup when the launcher exits, does not reach it. On
+/// Windows it gets its own process group and no console. On both, its standard
+/// streams are detached from ours so closing the launcher cannot disturb it and
+/// its output does not mix into ours.
+#[cfg(unix)]
+fn detach(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+    command.process_group(0);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+}
+
+#[cfg(windows)]
+fn detach(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    use std::process::Stdio;
+    // DETACHED_PROCESS detaches from our console, CREATE_NEW_PROCESS_GROUP gives
+    // it its own group so a group signal to us does not reach it.
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+}
+
+#[cfg(not(any(unix, windows)))]
+fn detach(_command: &mut Command) {}
 
 /// The engine a project needs, resolved against what is installed. The variant
 /// comes from whether the project uses C#. The version comes from the pin, then

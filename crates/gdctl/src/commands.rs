@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use godello_core::{
-    BlockReason, EngineRepository, Git, GodotProject, GodotVersion, LaunchError, NoProgress,
-    ProjectList, RepoStatus, Settings, SyncState, SystemCommandRunner, SystemLauncher, Target,
-    UpdateOutcome, Variant, VersionControl, VersionPattern, engine_for_project, find_project_dir,
-    open_editor, open_version, run_project,
+    BlockReason, DEFAULT_MAIN_BRANCH, EngineRepository, Git, GodotProject, GodotVersion,
+    LaunchError, NoProgress, ProjectList, RepoStatus, Settings, SyncState, SystemCommandRunner,
+    SystemLauncher, Target, UpdateOutcome, Variant, VersionControl, VersionPattern,
+    engine_for_project, find_project_dir, open_editor, open_version, run_project,
 };
 
 use crate::cli::{Command, ProjectCommand, SettingsCommand};
@@ -343,9 +343,31 @@ fn project_update(ctx: &Context, path: &Path, reset: bool) -> Result<()> {
         say!(ctx, "Reset to the tracked remote.");
         return Ok(());
     }
-    say!(ctx, "Checking the tracked remote for updates...");
+    // The main branch to update from. A project can name its own, otherwise the
+    // default is used.
+    let main_branch = GodotProject::load(&dir)
+        .map(|project| project.main_branch().to_string())
+        .unwrap_or_else(|_| DEFAULT_MAIN_BRANCH.to_string());
+
+    // When there are local changes, confirm before the update since the merge
+    // touches the working copy. The yes flag is consent in non interactive mode.
+    let status = git
+        .status(&dir, false)
+        .map_err(|err| anyhow!("could not read the status: {err}"))?;
+    if status.has_local_changes {
+        let proceed = ctx.yes
+            || ctx.confirm(
+                "The working copy has local changes. Merge updates in anyway?",
+                false,
+            );
+        if !proceed {
+            bail!("update cancelled");
+        }
+    }
+
+    say!(ctx, "Updating from {main_branch}...");
     match git
-        .update(&dir)
+        .update(&dir, &main_branch)
         .map_err(|err| anyhow!("could not update: {err}"))?
     {
         UpdateOutcome::AlreadyUpToDate => say!(ctx, "Already up to date."),
@@ -635,7 +657,7 @@ fn describe_sync(sync: &SyncState) -> String {
 fn describe_block(reason: BlockReason) -> String {
     match reason {
         BlockReason::LocalChanges => {
-            "Update blocked. The working copy has local changes. Commit or set them aside first."
+            "Update blocked. Local changes would be overwritten. Commit or set them aside first."
                 .to_string()
         }
         BlockReason::Diverged => {
@@ -644,6 +666,10 @@ fn describe_block(reason: BlockReason) -> String {
         }
         BlockReason::NoRemote => {
             "Update blocked. There is no tracked remote to update from.".to_string()
+        }
+        BlockReason::Conflict => {
+            "Update blocked. Merging the updates in would cause conflicts, so nothing changed."
+                .to_string()
         }
     }
 }
@@ -701,9 +727,10 @@ mod tests {
 
     #[test]
     fn describe_block_mentions_the_remedy() {
-        assert!(describe_block(BlockReason::LocalChanges).contains("local changes"));
+        assert!(describe_block(BlockReason::LocalChanges).contains("Local changes"));
         assert!(describe_block(BlockReason::Diverged).contains("--reset"));
         assert!(describe_block(BlockReason::NoRemote).contains("no tracked remote"));
+        assert!(describe_block(BlockReason::Conflict).contains("conflicts"));
     }
 
     #[test]

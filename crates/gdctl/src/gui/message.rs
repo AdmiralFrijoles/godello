@@ -13,6 +13,17 @@ use iced::Theme;
 use crate::gui::progress::ProgressEvent;
 use crate::gui::state::{Channel, EnginesTab, PinChoice, Screen};
 
+/// Why a launch failed, so the GUI can treat a C# build failure specially. The
+/// editor can still open without building, but other failures cannot be worked
+/// around here.
+#[derive(Debug, Clone)]
+pub enum LaunchFailure {
+    /// The C# build failed before the editor or project could start.
+    Compile(String),
+    /// Any other failure.
+    Other(String),
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     /// Switch the visible screen.
@@ -117,8 +128,22 @@ pub enum Message {
     CloseProjectMenu,
     /// Open the editor (run false) or run the project (run true).
     LaunchProject { dir: PathBuf, run: bool },
-    /// A launch finished, with success or an error.
-    LaunchFinished(Result<(), String>),
+    /// Any C# build is done and the editor or project is about to start. Moves the
+    /// project row from compiling to starting.
+    LaunchStarting { dir: PathBuf, run: bool },
+    /// A launch finished, with success or a failure. Carries the project and what
+    /// was being done so the row can stop working and a C# build failure on an
+    /// edit can offer to open the editor anyway.
+    LaunchFinished {
+        dir: PathBuf,
+        run: bool,
+        result: Result<(), LaunchFailure>,
+    },
+    /// Open the editor without building the C# solution first, after the user
+    /// chose to edit anyway past a build failure.
+    EditAnyway,
+    /// Dismiss the build failure dialog without opening the editor.
+    CancelCompileWarning,
     /// The resolve for an offered install finished. On success it raises the
     /// install offer dialog, carrying the launch to resume.
     OfferResolved {
@@ -151,8 +176,13 @@ pub enum Message {
         dir: PathBuf,
         status: Option<RepoStatus>,
     },
-    /// Bring a project up to date with its remote.
+    /// Bring a project up to date with its remote. When there are local changes
+    /// this raises a warning to confirm first, otherwise it updates right away.
     UpdateProject(PathBuf),
+    /// Go ahead with the update that raised a local changes warning.
+    ConfirmUpdate,
+    /// Dismiss the update warning without updating.
+    CancelUpdate,
     /// A project update finished.
     ProjectUpdated {
         dir: PathBuf,
