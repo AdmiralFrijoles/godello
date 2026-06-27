@@ -100,7 +100,12 @@ fn run_dotnet_build(project_dir: &Path, runner: &impl CommandRunner) -> Result<(
     let Some(target) = dotnet_target(project_dir) else {
         return Ok(());
     };
-    let args = vec![OsString::from("build"), target.into_os_string()];
+    let args = vec![
+        OsString::from("build"),
+        target.into_os_string(),
+        OsString::from("--property"),
+        OsString::from("WarningLevel=0")
+    ];
     let outcome = runner.run(OsStr::new("dotnet"), &args, project_dir)?;
     finish(outcome)
 }
