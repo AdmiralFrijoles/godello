@@ -86,6 +86,22 @@ impl GodotProject {
         self.main_branch.as_deref().unwrap_or(DEFAULT_MAIN_BRANCH)
     }
 
+    /// True when the project's resources have been imported at least once. The
+    /// editor writes imported data into a folder beside project.godot, so its
+    /// presence means an import has run. Godot 4 uses a .godot folder and Godot 3
+    /// uses a .import folder. The config version tells the two apart, and when it
+    /// is unknown either folder counts. A project that was never imported cannot
+    /// run, so a caller can import it first.
+    pub fn is_imported(&self) -> bool {
+        let godot = self.dir.join(".godot").is_dir();
+        let import = self.dir.join(".import").is_dir();
+        match self.config_version {
+            Some(version) if version >= 5 => godot,
+            Some(_) => import,
+            None => godot || import,
+        }
+    }
+
     /// The engine this project needs, as a version requirement and a variant.
     /// The pin wins when set, otherwise the feature hint is used. The variant is
     /// Mono when the project uses C#, otherwise Standard. Returns None when there
@@ -717,6 +733,55 @@ run/main_scene="res://main.tscn"
         let root = scratch("tree-none");
         fs::create_dir_all(root.join("src").join("assets")).unwrap();
         assert_eq!(find_project_dir_in_tree(&root), None);
+    }
+
+    // Import detection.
+
+    #[test]
+    fn a_fresh_project_is_not_imported() {
+        let dir = scratch("import-none");
+        write_project(&dir, GODOT4);
+        let project = GodotProject::load(&dir).unwrap();
+        assert!(!project.is_imported());
+    }
+
+    #[test]
+    fn godot_4_is_imported_by_the_godot_folder() {
+        let dir = scratch("import-godot4");
+        write_project(&dir, GODOT4);
+        fs::create_dir_all(dir.join(".godot")).unwrap();
+        let project = GodotProject::load(&dir).unwrap();
+        assert!(project.is_imported());
+    }
+
+    #[test]
+    fn godot_4_ignores_a_stray_godot_3_import_folder() {
+        // A config version 5 project only counts the .godot folder, so a leftover
+        // .import folder does not make it look imported.
+        let dir = scratch("import-godot4-stray");
+        write_project(&dir, GODOT4);
+        fs::create_dir_all(dir.join(".import")).unwrap();
+        let project = GodotProject::load(&dir).unwrap();
+        assert!(!project.is_imported());
+    }
+
+    #[test]
+    fn godot_3_is_imported_by_the_import_folder() {
+        let dir = scratch("import-godot3");
+        write_project(&dir, "config_version=4\n[application]\nconfig/name=\"X\"\n");
+        fs::create_dir_all(dir.join(".import")).unwrap();
+        let project = GodotProject::load(&dir).unwrap();
+        assert!(project.is_imported());
+    }
+
+    #[test]
+    fn an_unknown_config_version_accepts_either_folder() {
+        let dir = scratch("import-unknown");
+        write_project(&dir, "config_version=oops\n[application]\nconfig/name=\"X\"\n");
+        fs::create_dir_all(dir.join(".import")).unwrap();
+        let project = GodotProject::load(&dir).unwrap();
+        assert!(project.config_version.is_none());
+        assert!(project.is_imported());
     }
 
     #[test]

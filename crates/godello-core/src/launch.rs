@@ -18,7 +18,7 @@ use crate::Settings;
 use crate::csharp::{self, CsharpError};
 use crate::install::{InstallError, InstallManager};
 use crate::platform::{Os, current_os};
-use crate::process::CommandRunner;
+use crate::process::{CommandRunner, ProcessError};
 use crate::project::GodotProject;
 use crate::version::{GodotVersion, Variant, VersionPattern};
 
@@ -176,12 +176,48 @@ pub fn run_project(
     let (version, variant) = engine_for_project(manager, project)?;
     let editor = manager.executable(variant, version, false)?;
     maybe_build_csharp(settings, project, &editor, runner)?;
+    // A project that was never opened in the editor has no imported resources, so
+    // running it would fail. Import them first and wait for that to finish. This
+    // runs after any C# build, which opens the editor and so imports on its own,
+    // in which case there is nothing left to do here.
+    import_if_needed(project, &editor, runner)?;
     before_launch();
     let args = vec![
         OsString::from("--path"),
         project.dir.as_os_str().to_os_string(),
     ];
     launcher.launch(editor.as_os_str(), &args, settings.launch_detached)
+}
+
+/// Import a project's resources when they are not present yet. This opens the
+/// editor headless with the import flag, which imports and then exits on its own,
+/// and waits for it through the command runner so the run that follows has its
+/// resources ready. An already imported project is left alone.
+fn import_if_needed(
+    project: &GodotProject,
+    editor: &Path,
+    runner: &impl CommandRunner,
+) -> Result<(), LaunchError> {
+    if project.is_imported() {
+        return Ok(());
+    }
+    let args = vec![
+        OsString::from("--path"),
+        project.dir.as_os_str().to_os_string(),
+        OsString::from("--import"),
+        OsString::from("--headless"),
+    ];
+    let outcome = runner
+        .run(editor.as_os_str(), &args, &project.dir)
+        .map_err(LaunchError::Import)?;
+    if outcome.success {
+        Ok(())
+    } else {
+        Err(LaunchError::ImportFailed {
+            code: outcome.code,
+            output: outcome.combined(),
+        })
+    }
 }
 
 /// Open the editor for a version with no project. This shows the project manager
@@ -244,6 +280,10 @@ pub enum LaunchError {
     Engine(InstallError),
     /// The C# build failed.
     Csharp(CsharpError),
+    /// The import step could not be started.
+    Import(ProcessError),
+    /// The import step ran but failed.
+    ImportFailed { code: Option<i32>, output: String },
     /// The editor program could not be found.
     ProgramNotFound(OsString),
     /// The editor process could not be started.
@@ -259,6 +299,17 @@ impl std::fmt::Display for LaunchError {
             },
             LaunchError::Engine(err) => write!(f, "{err}"),
             LaunchError::Csharp(err) => write!(f, "{err}"),
+            LaunchError::Import(err) => write!(f, "could not import the project: {err}"),
+            LaunchError::ImportFailed { code, output } => {
+                let code = code
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                if output.is_empty() {
+                    write!(f, "the project import failed with exit code {code}")
+                } else {
+                    write!(f, "the project import failed with exit code {code}:\n{output}")
+                }
+            }
             LaunchError::ProgramNotFound(program) => {
                 write!(f, "could not run the editor {}", program.to_string_lossy())
             }
@@ -272,6 +323,7 @@ impl std::error::Error for LaunchError {
         match self {
             LaunchError::Engine(err) => Some(err),
             LaunchError::Csharp(err) => Some(err),
+            LaunchError::Import(err) => Some(err),
             LaunchError::Spawn(err) => Some(err),
             _ => None,
         }
@@ -369,29 +421,33 @@ mod tests {
         }
     }
 
-    /// A build runner that records whether it ran and can be set to fail.
+    /// A build runner that records the args of each call and can be set to fail.
     struct FakeRunner {
-        ran: RefCell<bool>,
+        calls: RefCell<Vec<Vec<OsString>>>,
         fail: bool,
     }
 
     impl FakeRunner {
         fn new() -> Self {
             FakeRunner {
-                ran: RefCell::new(false),
+                calls: RefCell::new(Vec::new()),
                 fail: false,
             }
         }
 
         fn failing() -> Self {
             FakeRunner {
-                ran: RefCell::new(false),
+                calls: RefCell::new(Vec::new()),
                 fail: true,
             }
         }
 
         fn ran(&self) -> bool {
-            *self.ran.borrow()
+            !self.calls.borrow().is_empty()
+        }
+
+        fn last_args(&self) -> Vec<OsString> {
+            self.calls.borrow().last().cloned().unwrap()
         }
     }
 
@@ -399,10 +455,10 @@ mod tests {
         fn run(
             &self,
             _program: &OsStr,
-            _args: &[OsString],
+            args: &[OsString],
             _cwd: &Path,
         ) -> Result<crate::process::CommandOutcome, crate::process::ProcessError> {
-            *self.ran.borrow_mut() = true;
+            self.calls.borrow_mut().push(args.to_vec());
             Ok(crate::process::CommandOutcome {
                 success: !self.fail,
                 code: Some(if self.fail { 1 } else { 0 }),
@@ -533,6 +589,92 @@ mod tests {
         let (_program, args, _detached) = launcher.last();
         assert!(args.contains(&OsString::from("--path")));
         assert!(!args.contains(&OsString::from("--editor")));
+    }
+
+    #[test]
+    fn run_imports_an_unimported_project_first() {
+        let root = scratch("import-needed-root");
+        install_engine(&root, Variant::Standard, stable(4, 3, 0));
+        let manager = InstallManager::new(&root, root.join("dl"));
+        let proj_dir = scratch("import-needed-proj");
+        let project = write_project(&proj_dir, PLAIN);
+        let runner = FakeRunner::new();
+        let launcher = FakeLauncher::new();
+        run_project(
+            &manager,
+            &Settings::default(),
+            &project,
+            &runner,
+            &launcher,
+            || {},
+        )
+        .unwrap();
+
+        // The import ran headless with the import flag pointed at the project.
+        assert!(runner.ran(), "an unimported project should be imported first");
+        let args = runner.last_args();
+        assert!(args.contains(&OsString::from("--import")));
+        assert!(args.contains(&OsString::from("--headless")));
+        let path_index = args.iter().position(|a| a == "--path").unwrap();
+        assert_eq!(args[path_index + 1], proj_dir.as_os_str());
+        // The project still launched after the import.
+        assert_eq!(launcher.count(), 1);
+    }
+
+    #[test]
+    fn run_skips_import_when_already_imported() {
+        let root = scratch("import-skip-root");
+        install_engine(&root, Variant::Standard, stable(4, 3, 0));
+        let manager = InstallManager::new(&root, root.join("dl"));
+        let proj_dir = scratch("import-skip-proj");
+        let project = write_project(&proj_dir, PLAIN);
+        // A .godot folder means the project was already imported.
+        fs::create_dir_all(proj_dir.join(".godot")).unwrap();
+        let runner = FakeRunner::new();
+        let launcher = FakeLauncher::new();
+        run_project(
+            &manager,
+            &Settings::default(),
+            &project,
+            &runner,
+            &launcher,
+            || {},
+        )
+        .unwrap();
+
+        // No import was needed, so the runner never ran.
+        assert!(
+            !runner.ran(),
+            "an imported project should not be imported again"
+        );
+        assert_eq!(launcher.count(), 1);
+    }
+
+    #[test]
+    fn an_import_failure_stops_the_run() {
+        let root = scratch("import-fail-root");
+        install_engine(&root, Variant::Standard, stable(4, 3, 0));
+        let manager = InstallManager::new(&root, root.join("dl"));
+        let proj_dir = scratch("import-fail-proj");
+        let project = write_project(&proj_dir, PLAIN);
+        let runner = FakeRunner::failing();
+        let launcher = FakeLauncher::new();
+        let hook_ran = RefCell::new(false);
+        let result = run_project(
+            &manager,
+            &Settings::default(),
+            &project,
+            &runner,
+            &launcher,
+            || {
+                *hook_ran.borrow_mut() = true;
+            },
+        );
+        assert!(matches!(result, Err(LaunchError::ImportFailed { .. })));
+        // The project must not run when the import failed.
+        assert_eq!(launcher.count(), 0);
+        // The before launch hook must not fire when the import failed.
+        assert!(!*hook_ran.borrow());
     }
 
     #[test]
