@@ -41,6 +41,20 @@ pub fn pick_project_file() -> Task<Message> {
     )
 }
 
+/// Open the native folder picker to choose the default project folder.
+pub fn pick_project_dir() -> Task<Message> {
+    Task::perform(
+        async {
+            rfd::AsyncFileDialog::new()
+                .set_title("Choose the default project folder")
+                .pick_folder()
+                .await
+                .map(|handle| handle.path().to_path_buf())
+        },
+        Message::ProjectDirPicked,
+    )
+}
+
 /// Open the native folder picker to choose where engines are installed.
 pub fn pick_engine_dir() -> Task<Message> {
     Task::perform(

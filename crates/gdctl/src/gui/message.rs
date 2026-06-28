@@ -60,6 +60,12 @@ pub enum Message {
     EngineDirPicked(Option<PathBuf>),
     /// Reset the engine install folder to the default.
     ResetEngineDir,
+    /// Open a folder picker to choose the default project folder.
+    ChooseProjectDir,
+    /// The default project folder was picked, or the picker was cancelled.
+    ProjectDirPicked(Option<PathBuf>),
+    /// Clear the default project folder.
+    ResetProjectDir,
     /// Set the variant used when nothing else says.
     SetDefaultVariant(Variant),
     /// Set whether prereleases are included by default.
@@ -186,9 +192,11 @@ pub enum Message {
     CancelPin,
 
     // Version control.
-    /// Re check the status of every project. Fired on a timer so local changes
-    /// show up without the user doing anything.
-    RefreshGitStatuses,
+    /// Re check every project on a timer, so changes show up without the user
+    /// doing anything. This re reads each project.godot for its version, re scans
+    /// the installed engines so the engine pill is current, and rechecks the git
+    /// status of each project.
+    RecheckProjects,
     /// The git status of a project loaded.
     GitStatusLoaded {
         dir: PathBuf,

@@ -160,6 +160,9 @@ pub struct App {
     pub install_offer: Option<InstallOffer>,
     /// The open clone dialog, if any.
     pub clone_dialog: Option<CloneDialog>,
+    /// The url of a clone in progress, if any, so the projects list can show it
+    /// is working until the clone finishes.
+    pub cloning: Option<String>,
     /// A launch to resume once an offered install finishes.
     pub pending_launch: Option<PendingLaunch>,
     /// A raised warning that an update would touch local changes, if any.
@@ -289,6 +292,7 @@ impl App {
             pin_editor: None,
             install_offer: None,
             clone_dialog: None,
+            cloning: None,
             pending_launch: None,
             update_warning: None,
             project_activity: HashMap::new(),

@@ -82,6 +82,10 @@ pub struct Settings {
     /// Where engines are installed. None means use the default engines folder.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub engine_install_dir: Option<PathBuf>,
+    /// The folder new projects go into by default, for example the destination a
+    /// clone starts from. None means none is set, so the user picks each time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_project_dir: Option<PathBuf>,
     /// Build the C# solution before opening the editor.
     pub build_csharp_before_launch: bool,
     /// Which tool builds the C# solution.
@@ -102,6 +106,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             engine_install_dir: None,
+            default_project_dir: None,
             build_csharp_before_launch: true,
             csharp_build_tool: CsharpBuildTool::Godot,
             include_prereleases: false,
@@ -117,6 +122,7 @@ impl Settings {
     /// kept in step with get_field and set_field.
     pub const FIELD_NAMES: &'static [&'static str] = &[
         "engine_install_dir",
+        "default_project_dir",
         "build_csharp_before_launch",
         "csharp_build_tool",
         "include_prereleases",
@@ -176,6 +182,10 @@ impl Settings {
                 .engine_install_dir
                 .as_ref()
                 .map(|path| path.display().to_string()),
+            "default_project_dir" => self
+                .default_project_dir
+                .as_ref()
+                .map(|path| path.display().to_string()),
             "build_csharp_before_launch" => Some(self.build_csharp_before_launch.to_string()),
             "csharp_build_tool" => Some(self.csharp_build_tool.to_string()),
             "include_prereleases" => Some(self.include_prereleases.to_string()),
@@ -192,6 +202,13 @@ impl Settings {
         match key {
             "engine_install_dir" => {
                 self.engine_install_dir = if value.trim().is_empty() {
+                    None
+                } else {
+                    Some(PathBuf::from(value))
+                };
+            }
+            "default_project_dir" => {
+                self.default_project_dir = if value.trim().is_empty() {
                     None
                 } else {
                     Some(PathBuf::from(value))
@@ -412,6 +429,7 @@ mod tests {
         assert!(!settings.include_prereleases);
         assert_eq!(settings.default_variant, Variant::Standard);
         assert_eq!(settings.engine_install_dir, None);
+        assert_eq!(settings.default_project_dir, None);
         assert!(!settings.launch_detached);
         assert_eq!(settings.theme, "dark");
     }
@@ -530,6 +548,7 @@ mod tests {
         // stray or misspelled name would return None and fail here.
         let settings = Settings {
             engine_install_dir: Some(PathBuf::from("/x")),
+            default_project_dir: Some(PathBuf::from("/projects")),
             ..Settings::default()
         };
         for key in Settings::FIELD_NAMES {
@@ -637,6 +656,21 @@ mod tests {
         settings.save(&path).unwrap();
         let loaded = Settings::load(&path).unwrap();
         assert_eq!(loaded.theme, "midnight");
+    }
+
+    #[test]
+    fn set_field_sets_and_resets_project_dir() {
+        let mut settings = Settings::default();
+        settings
+            .set_field("default_project_dir", "/home/me/games")
+            .unwrap();
+        assert_eq!(
+            settings.default_project_dir,
+            Some(PathBuf::from("/home/me/games"))
+        );
+        // An empty value clears it back to none.
+        settings.set_field("default_project_dir", "").unwrap();
+        assert_eq!(settings.default_project_dir, None);
     }
 
     #[test]

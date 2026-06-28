@@ -5,7 +5,7 @@
 //! separate apply or revert step.
 
 use godello_core::{CsharpBuildTool, Variant};
-use iced::widget::{button, checkbox, column, container, pick_list, row, scrollable, text};
+use iced::widget::{Row, button, checkbox, column, container, pick_list, row, scrollable, text};
 use iced::{Alignment, Element, Length};
 
 use crate::gui::state::App;
@@ -62,6 +62,43 @@ pub fn view(state: &App) -> Element<'_, Message> {
     .spacing(style::GAP_M)
     .align_y(Alignment::Center);
 
+    // Projects.
+    let project_dir = match &settings.default_project_dir {
+        Some(dir) => {
+            let buttons = row![
+                button(text("Choose..."))
+                    .padding(style::BTN_PAD)
+                    .style(style::button_secondary)
+                    .on_press(Message::ChooseProjectDir),
+                button(text("Reset"))
+                    .padding(style::BTN_PAD)
+                    .style(style::button_tertiary)
+                    .on_press(Message::ResetProjectDir),
+            ]
+            .spacing(style::GAP_S)
+            .align_y(Alignment::Center);
+            project_dir_row(
+                "New projects and clones start in this folder.",
+                Some(dir.display().to_string()),
+                buttons,
+            )
+        }
+        None => {
+            let buttons = row![
+                button(text("Choose..."))
+                    .padding(style::BTN_PAD)
+                    .style(style::button_secondary)
+                    .on_press(Message::ChooseProjectDir),
+            ]
+            .align_y(Alignment::Center);
+            project_dir_row(
+                "No default is set, so you pick a folder each time you clone.",
+                None,
+                buttons,
+            )
+        }
+    };
+
     let variant_control = pick_list(
         &VARIANTS[..],
         Some(settings.default_variant),
@@ -109,6 +146,8 @@ pub fn view(state: &App) -> Element<'_, Message> {
             "Offer release candidate, beta, and dev builds when resolving versions.",
             prereleases_control,
         ),
+        heading("Projects"),
+        project_dir,
         heading("C#"),
         field(
             "Build before launching",
@@ -143,6 +182,28 @@ pub fn view(state: &App) -> Element<'_, Message> {
 /// A section heading.
 fn heading(label: &str) -> Element<'_, Message> {
     text(label.to_string()).size(style::TEXT_HEADING).into()
+}
+
+/// The default project folder row: a title and description on the left, the
+/// chosen path when set, and the choose and reset buttons on the right.
+fn project_dir_row<'a>(
+    description: &'a str,
+    path: Option<String>,
+    buttons: Row<'a, Message>,
+) -> Element<'a, Message> {
+    let mut info = column![
+        text("Default project folder").size(style::TEXT_BODY),
+        text(description).size(style::TEXT_CAPTION),
+    ]
+    .spacing(style::GAP_XS)
+    .width(Length::Fill);
+    if let Some(path) = path {
+        info = info.push(widgets::path_label(path));
+    }
+    row![info, buttons]
+        .spacing(style::GAP_M)
+        .align_y(Alignment::Center)
+        .into()
 }
 
 /// One setting row: a title and a short description on the left, the control on

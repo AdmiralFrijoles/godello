@@ -51,20 +51,49 @@ fn header() -> Element<'static, Message> {
     .into()
 }
 
-/// The list of project row cards.
+/// The list of project row cards. A clone in progress shows as a card at the top
+/// until it finishes.
 fn project_list(state: &App) -> Element<'_, Message> {
+    let mut items: Vec<Element<'_, Message>> = Vec::new();
+    if let Some(url) = &state.cloning {
+        items.push(cloning_card(url));
+    }
+
     match &state.projects {
-        Load::Idle | Load::Loading => hint("Reading your projects..."),
-        Load::Failed(err) => hint(format!("Could not read your projects: {err}")),
+        Load::Idle | Load::Loading => items.push(hint("Reading your projects...")),
+        Load::Failed(err) => items.push(hint(format!("Could not read your projects: {err}"))),
         Load::Loaded(entries) if entries.is_empty() => {
-            hint("No projects yet. Add one or clone a repository.")
+            // Skip the empty hint while a clone is running, since it is about to
+            // add the first project.
+            if state.cloning.is_none() {
+                items.push(hint("No projects yet. Add one or clone a repository."));
+            }
         }
         Load::Loaded(entries) => {
-            let rows: Vec<Element<'_, Message>> =
-                entries.iter().map(|e| project_row(state, e)).collect();
-            column(rows).spacing(style::GAP_S).into()
+            for entry in entries {
+                items.push(project_row(state, entry));
+            }
         }
     }
+
+    column(items).spacing(style::GAP_S).into()
+}
+
+/// A card shown while a repository is being cloned, so the work stays visible
+/// until it finishes.
+fn cloning_card<'a>(url: &'a str) -> Element<'a, Message> {
+    let body = column![
+        busy_indicator("Cloning..."),
+        text(url).size(style::TEXT_CAPTION).style(style::muted_text),
+    ]
+    .spacing(style::GAP_XS)
+    .width(Length::Fill);
+
+    container(body)
+        .padding(style::GAP_M)
+        .width(Length::Fill)
+        .style(style::card)
+        .into()
 }
 
 /// One project row card.

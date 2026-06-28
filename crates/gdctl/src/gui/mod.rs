@@ -98,7 +98,7 @@ fn subscription(state: &App) -> Subscription<Message> {
         subs.push(iced::time::every(TOAST_TICK).map(|_| Message::ToastTick));
     }
     if state.screen == Screen::Projects && matches!(state.projects, Load::Loaded(_)) {
-        subs.push(iced::time::every(VCS_REFRESH).map(|_| Message::RefreshGitStatuses));
+        subs.push(iced::time::every(VCS_REFRESH).map(|_| Message::RecheckProjects));
     }
     Subscription::batch(subs)
 }
@@ -174,6 +174,18 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
             state.ctx.settings.engine_install_dir = None;
             save_settings(state);
             reload_installed(state);
+            Task::none()
+        }
+        Message::ChooseProjectDir => tasks::pick_project_dir(),
+        Message::ProjectDirPicked(None) => Task::none(),
+        Message::ProjectDirPicked(Some(dir)) => {
+            state.ctx.settings.default_project_dir = Some(dir);
+            save_settings(state);
+            Task::none()
+        }
+        Message::ResetProjectDir => {
+            state.ctx.settings.default_project_dir = None;
+            save_settings(state);
             Task::none()
         }
         Message::SetDefaultVariant(variant) => {
@@ -567,16 +579,30 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
         }
 
         // Version control.
-        Message::RefreshGitStatuses => match &state.projects {
-            Load::Loaded(entries) => {
-                let checks: Vec<Task<Message>> = entries
-                    .iter()
-                    .map(|entry| tasks::git_status(entry.path.clone()))
-                    .collect();
-                Task::batch(checks)
+        Message::RecheckProjects => {
+            let Load::Loaded(entries) = &state.projects else {
+                return Task::none();
+            };
+            let entries = entries.clone();
+            // Re scan the installed engines so the engine pill knows what is on
+            // disk now, for example after a version was installed or removed.
+            reload_installed(state);
+            // Re read each project.godot so a changed version pin or C# state
+            // shows, and forget the parsed info when the file is gone.
+            let mut checks = Vec::new();
+            for entry in entries {
+                match GodotProject::load(&entry.path) {
+                    Ok(project) => {
+                        state.project_info.insert(entry.path.clone(), project);
+                    }
+                    Err(_) => {
+                        state.project_info.remove(&entry.path);
+                    }
+                }
+                checks.push(tasks::git_status(entry.path.clone()));
             }
-            _ => Task::none(),
-        },
+            Task::batch(checks)
+        }
         Message::GitStatusLoaded { dir, status } => {
             match status {
                 Some(status) => {
@@ -631,7 +657,12 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
 
         // Cloning.
         Message::OpenCloneDialog => {
-            state.clone_dialog = Some(CloneDialog::default());
+            // Start the destination at the configured default project folder, so
+            // the common case needs no folder picking.
+            state.clone_dialog = Some(CloneDialog {
+                url: String::new(),
+                dest: state.ctx.settings.default_project_dir.clone(),
+            });
             Task::none()
         }
         Message::CloneUrlChanged(url) => {
@@ -663,10 +694,13 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
                 return Task::none();
             };
             state.clone_dialog = None;
-            state.toast(ToastKind::Info, "Cloning...");
+            // Mark the clone as in progress so the projects list shows it working
+            // until it finishes. The card is the indicator, so no start toast.
+            state.cloning = Some(url.clone());
             tasks::clone_repo(url, dest, state.ctx.paths.projects_file())
         }
         Message::Cloned(Ok(entry)) => {
+            state.cloning = None;
             match entry {
                 Some(_) => state.toast(ToastKind::Info, "Cloned and added the project."),
                 None => state.toast(
@@ -677,6 +711,7 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
             reload_projects(state)
         }
         Message::Cloned(Err(err)) => {
+            state.cloning = None;
             state.toast(ToastKind::Error, format!("Could not clone: {err}"));
             Task::none()
         }
