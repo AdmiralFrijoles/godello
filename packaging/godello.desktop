@@ -7,3 +7,4 @@ Exec=gdctl
 Icon=godello
 Categories=Development;
 Terminal=false
+StartupWMClass=godello

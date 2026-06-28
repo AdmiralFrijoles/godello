@@ -47,12 +47,32 @@ const TOAST_TICK: Duration = Duration::from_millis(16);
 /// changes show without the user asking.
 const VCS_REFRESH: Duration = Duration::from_secs(10);
 
+/// The application id. On Wayland this is the only way the window and the task
+/// bar find the icon, since the compositor matches this against the installed
+/// desktop file rather than using a pixel buffer. It must match the basename of
+/// the desktop file so the two line up.
+#[cfg(target_os = "linux")]
+const APP_ID: &str = "godello";
+
 /// Open the desktop app and run until the window closes.
 ///
 /// iced owns the event loop and its own runtime, so this blocks. The boot hook
 /// clones the shared context into the starting state and kicks off the first
 /// load of installed engines.
 pub fn launch(ctx: crate::context::Context) -> iced::Result {
+    // The pixel icon works on Windows and X11 but Wayland ignores it. There the
+    // app id below is what carries the icon, so we set both.
+    let mut window = iced::window::Settings {
+        size: Size::new(1024.0, 620.0),
+        min_size: Some(Size::new(1024.0, 620.0)),
+        icon: window_icon(),
+        ..iced::window::Settings::default()
+    };
+    #[cfg(target_os = "linux")]
+    {
+        window.platform_specific.application_id = APP_ID.to_string();
+    }
+
     iced::application(
         move || {
             (
@@ -71,12 +91,7 @@ pub fn launch(ctx: crate::context::Context) -> iced::Result {
     .title("Godello")
     .theme(|state: &App| state.theme.clone())
     .subscription(subscription)
-    .window(iced::window::Settings {
-        size: Size::new(1024.0, 620.0),
-        min_size: Some(Size::new(1024.0, 620.0)),
-        icon: window_icon(),
-        ..iced::window::Settings::default()
-    })
+    .window(window)
     .run()
 }
 
