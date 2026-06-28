@@ -33,8 +33,18 @@ impl Context {
     /// Resolve folders, load settings, and build the network client.
     pub fn load(yes: bool, silent: bool) -> Result<Self> {
         let paths = Paths::discover().context("could not resolve the application folders")?;
-        let settings =
-            Settings::load(&paths.settings_file()).context("could not load the settings")?;
+        let settings_file = paths.settings_file();
+        let settings = if settings_file.exists() {
+            Settings::load(&settings_file).context("could not load the settings")?
+        } else {
+            // First run. Pick sensible defaults from what the system has, such as
+            // using dotnet for C# builds when it is installed, and save them so
+            // the choice is stable and visible. A save problem is not fatal, the
+            // same defaults still apply in memory for this run.
+            let settings = Settings::initial();
+            let _ = settings.save(&settings_file);
+            settings
+        };
         let client =
             WebClient::new().map_err(|err| anyhow!("could not start the network client: {err}"))?;
         Ok(Context {

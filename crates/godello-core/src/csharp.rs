@@ -59,6 +59,38 @@ impl FromStr for CsharpBuildTool {
     }
 }
 
+/// The build tool to start with on a fresh install, picked from what the system
+/// has. When dotnet is on the PATH it is the default, since a developer with
+/// dotnet usually prefers it. Otherwise the Godot editor builds the solutions,
+/// which needs nothing extra installed.
+pub fn default_build_tool() -> CsharpBuildTool {
+    if dotnet_on_path() {
+        CsharpBuildTool::Dotnet
+    } else {
+        CsharpBuildTool::Godot
+    }
+}
+
+/// True when a dotnet executable can be found on the PATH.
+pub fn dotnet_on_path() -> bool {
+    match std::env::var_os("PATH") {
+        Some(path) => dotnet_in(&path, |candidate| candidate.is_file()),
+        None => false,
+    }
+}
+
+/// The PATH scan behind dotnet_on_path, with the file check passed in so it can
+/// be tested without touching the real filesystem. True when any folder on the
+/// path holds a dotnet executable.
+fn dotnet_in(path: &OsStr, is_exe: impl Fn(&Path) -> bool) -> bool {
+    let names: &[&str] = if cfg!(windows) {
+        &["dotnet.exe"]
+    } else {
+        &["dotnet"]
+    };
+    std::env::split_paths(path).any(|dir| names.iter().any(|name| is_exe(&dir.join(name))))
+}
+
 /// Build the C# solutions for a project with the chosen tool. The editor should
 /// be the Mono build for the project's version. It is used by the Godot tool and
 /// ignored by the dotnet tool. Blocks until the build finishes.
@@ -397,5 +429,33 @@ mod tests {
         let text = err.to_string();
         assert!(text.contains("exit code 1"));
         assert!(text.contains("CS1002"));
+    }
+
+    // Dotnet detection.
+
+    fn exe_name() -> &'static str {
+        if cfg!(windows) { "dotnet.exe" } else { "dotnet" }
+    }
+
+    #[test]
+    fn dotnet_in_finds_it_in_a_listed_folder() {
+        let path = std::env::join_paths(["/opt/bin", "/usr/share/dotnet"]).unwrap();
+        let wanted = PathBuf::from("/usr/share/dotnet").join(exe_name());
+        assert!(dotnet_in(&path, |candidate| candidate == wanted));
+    }
+
+    #[test]
+    fn dotnet_in_is_false_when_no_folder_has_it() {
+        // The file check never matches, so no folder on the path qualifies.
+        let path = std::env::join_paths(["/opt/bin", "/usr/bin"]).unwrap();
+        assert!(!dotnet_in(&path, |_| false));
+    }
+
+    #[test]
+    fn dotnet_in_checks_only_the_dotnet_name() {
+        // A folder is on the path, but it holds some other tool, not dotnet.
+        let path = std::env::join_paths(["/opt/bin"]).unwrap();
+        let other = PathBuf::from("/opt/bin").join("node");
+        assert!(!dotnet_in(&path, |candidate| candidate == other));
     }
 }

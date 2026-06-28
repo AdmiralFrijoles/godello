@@ -125,6 +125,17 @@ impl Settings {
         "theme",
     ];
 
+    /// The settings for a brand new install. Like the plain defaults, but the C#
+    /// build tool is chosen from what the system has, so a machine with dotnet
+    /// uses it without the user having to pick. Meant to be saved once on first
+    /// run, after which the saved file is the source of truth.
+    pub fn initial() -> Settings {
+        Settings {
+            csharp_build_tool: crate::csharp::default_build_tool(),
+            ..Settings::default()
+        }
+    }
+
     /// Load settings from a file. A missing file gives the defaults.
     pub fn load(path: &Path) -> Result<Settings, ConfigError> {
         let text = match fs::read_to_string(path) {
