@@ -38,7 +38,7 @@ pub enum EnginesTab {
 /// related group, so the form stays short instead of one long scroll.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
-    Appearance,
+    General,
     Engines,
     Projects,
     Csharp,
@@ -48,7 +48,7 @@ pub enum SettingsTab {
 impl SettingsTab {
     /// The tabs in the order they show, so the bar and the labels stay in sync.
     pub const ALL: [SettingsTab; 5] = [
-        SettingsTab::Appearance,
+        SettingsTab::General,
         SettingsTab::Engines,
         SettingsTab::Projects,
         SettingsTab::Csharp,
@@ -58,7 +58,7 @@ impl SettingsTab {
     /// The label shown on the tab.
     pub fn label(self) -> &'static str {
         match self {
-            SettingsTab::Appearance => "Appearance",
+            SettingsTab::General => "General",
             SettingsTab::Engines => "Engines",
             SettingsTab::Projects => "Projects",
             SettingsTab::Csharp => "C#",
@@ -312,7 +312,7 @@ impl App {
             ctx,
             screen: Screen::Projects,
             theme,
-            settings_tab: SettingsTab::Appearance,
+            settings_tab: SettingsTab::General,
             toasts: Vec::new(),
             next_toast_id: 0,
             toast_paused: false,

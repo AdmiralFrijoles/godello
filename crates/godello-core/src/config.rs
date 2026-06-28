@@ -97,6 +97,9 @@ pub struct Settings {
     /// Start the editor or project detached so the command returns right away.
     /// When off, the command stays attached and waits for the editor to close.
     pub launch_detached: bool,
+    /// Close the desktop app after it launches a project or opens the project
+    /// manager. The command line ignores this.
+    pub close_on_launch: bool,
     /// The color theme the desktop app opens with. A short name the app maps to
     /// one of its themes. The command line ignores this.
     pub theme: String,
@@ -112,6 +115,7 @@ impl Default for Settings {
             include_prereleases: false,
             default_variant: Variant::Standard,
             launch_detached: false,
+            close_on_launch: true,
             theme: "dark".to_string(),
         }
     }
@@ -128,6 +132,7 @@ impl Settings {
         "include_prereleases",
         "default_variant",
         "launch_detached",
+        "close_on_launch",
         "theme",
     ];
 
@@ -191,6 +196,7 @@ impl Settings {
             "include_prereleases" => Some(self.include_prereleases.to_string()),
             "default_variant" => Some(self.default_variant.to_string()),
             "launch_detached" => Some(self.launch_detached.to_string()),
+            "close_on_launch" => Some(self.close_on_launch.to_string()),
             "theme" => Some(self.theme.clone()),
             _ => None,
         }
@@ -228,6 +234,9 @@ impl Settings {
             }
             "launch_detached" => {
                 self.launch_detached = parse_bool(key, value)?;
+            }
+            "close_on_launch" => {
+                self.close_on_launch = parse_bool(key, value)?;
             }
             "theme" => {
                 let name = value.trim();
@@ -431,6 +440,7 @@ mod tests {
         assert_eq!(settings.engine_install_dir, None);
         assert_eq!(settings.default_project_dir, None);
         assert!(!settings.launch_detached);
+        assert!(settings.close_on_launch);
         assert_eq!(settings.theme, "dark");
     }
 
@@ -587,6 +597,20 @@ mod tests {
         assert!(!settings.build_csharp_before_launch);
         settings.set_field("include_prereleases", "on").unwrap();
         assert!(settings.include_prereleases);
+    }
+
+    #[test]
+    fn set_field_toggles_close_on_launch() {
+        let mut settings = Settings::default();
+        assert!(settings.close_on_launch);
+        settings.set_field("close_on_launch", "false").unwrap();
+        assert!(!settings.close_on_launch);
+        assert_eq!(
+            settings.get_field("close_on_launch").as_deref(),
+            Some("false")
+        );
+        settings.set_field("close_on_launch", "yes").unwrap();
+        assert!(settings.close_on_launch);
     }
 
     #[test]

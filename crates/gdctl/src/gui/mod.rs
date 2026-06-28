@@ -227,6 +227,11 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
             save_settings(state);
             Task::none()
         }
+        Message::SetCloseOnLaunch(on) => {
+            state.ctx.settings.close_on_launch = on;
+            save_settings(state);
+            Task::none()
+        }
         Message::RemoteLoaded(Ok(mut releases)) => {
             // Newest first, matching the CLI listing.
             releases.sort_by_key(|release| std::cmp::Reverse(release.version));
@@ -280,11 +285,20 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
         Message::OpenProjectManager { variant, version } => {
             state.menu_open = None;
             let manager = state.ctx.install_manager();
-            if let Err(err) = open_version(&manager, version, variant, true, &SystemLauncher) {
-                state.toast(
-                    ToastKind::Error,
-                    format!("Could not open the project manager: {err}"),
-                );
+            match open_version(&manager, version, variant, true, &SystemLauncher) {
+                Ok(()) => {
+                    // The project manager opened detached, so the launcher can close
+                    // now without disturbing it, when the user asked for that.
+                    if state.ctx.settings.close_on_launch {
+                        return iced::exit();
+                    }
+                }
+                Err(err) => {
+                    state.toast(
+                        ToastKind::Error,
+                        format!("Could not open the project manager: {err}"),
+                    );
+                }
             }
             Task::none()
         }
@@ -495,7 +509,13 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
         Message::LaunchFinished { dir, run, result } => {
             state.project_activity.remove(&dir);
             match result {
-                Ok(()) => {}
+                Ok(()) => {
+                    // The launch ran detached, so the launcher can close now without
+                    // disturbing it, when the user asked for that.
+                    if state.ctx.settings.close_on_launch {
+                        return iced::exit();
+                    }
+                }
                 // A C# build failure on an edit. Offer to open the editor anyway,
                 // so the user can fix the code in the editor.
                 Err(LaunchFailure::Compile(error)) if !run => {

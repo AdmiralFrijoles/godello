@@ -20,7 +20,7 @@ const BUILD_TOOLS: [CsharpBuildTool; 2] = [CsharpBuildTool::Godot, CsharpBuildTo
 /// of settings, and only that group's form shows below it.
 pub fn view(state: &App) -> Element<'_, Message> {
     let form = match state.settings_tab {
-        SettingsTab::Appearance => appearance(state),
+        SettingsTab::General => general(state),
         SettingsTab::Engines => engines(state),
         SettingsTab::Projects => projects(state),
         SettingsTab::Csharp => csharp(state),
@@ -53,15 +53,26 @@ fn tab_bar(state: &App) -> Element<'_, Message> {
     bar.into()
 }
 
-/// The appearance settings: the theme picker.
-fn appearance(state: &App) -> Element<'_, Message> {
+/// The general settings: the theme picker and the close on launch toggle.
+fn general(state: &App) -> Element<'_, Message> {
     let theme_control = pick_list(themes(), Some(state.theme.clone()), Message::SetTheme)
         .style(style::pick_list)
         .into();
 
-    column![field("Theme", "The color theme of the app.", theme_control)]
-        .spacing(style::GAP_M)
-        .into()
+    let close_control = checkbox(state.ctx.settings.close_on_launch)
+        .on_toggle(Message::SetCloseOnLaunch)
+        .into();
+
+    column![
+        field("Theme", "The color theme of the app.", theme_control),
+        field(
+            "Close after launching",
+            "Close the launcher when you run or edit a project or open the project manager.",
+            close_control,
+        ),
+    ]
+    .spacing(style::GAP_M)
+    .into()
 }
 
 /// The engine settings: install location, default variant, and prereleases.

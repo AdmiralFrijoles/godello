@@ -76,6 +76,9 @@ pub enum Message {
     SetBuildCsharp(bool),
     /// Set which tool builds the C# solution.
     SetCsharpBuildTool(CsharpBuildTool),
+    /// Set whether the launcher closes after it launches a project or opens the
+    /// project manager.
+    SetCloseOnLaunch(bool),
 
     /// Switch between the installed and available lists.
     SetEnginesTab(EnginesTab),
