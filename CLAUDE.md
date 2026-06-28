@@ -15,7 +15,7 @@ messages.
 
 Never name the reference launchers in code comments or in user facing output such
 as the README or CLI help. Justify decisions on their own merits instead. Studying
-them and keeping notes under docs/research is fine.
+them is fine.
 
 ## Workspace layout
 
@@ -65,7 +65,7 @@ module tests show the expected style.
 
 ## Decisions
 
-These are settled. See docs/plan.md for the full plan.
+These are settled.
 
 - A project records its required engine version inside its own project.godot file
   under a godello section. The pin travels with the project.
@@ -88,5 +88,3 @@ These are settled. See docs/plan.md for the full plan.
   project.godot as INI (config_version, a mono section means C#). It has no arch
   detection and no C# pre build, which are opportunities for us. MIT, so patterns
   are reusable.
-
-See docs/research/ for the full notes.
