@@ -13,7 +13,7 @@ use godello_core::{
 use iced::Theme;
 
 use crate::gui::progress::ProgressEvent;
-use crate::gui::state::{Channel, EnginesTab, PinChoice, Screen};
+use crate::gui::state::{Channel, EnginesTab, PinChoice, Screen, SettingsTab};
 
 /// Why a launch failed, so the GUI can treat a C# build failure specially. The
 /// editor can still open without building, but other failures cannot be worked
@@ -54,6 +54,8 @@ pub enum Message {
     ClearCache,
 
     // Settings.
+    /// Switch the settings screen to another group of settings.
+    SetSettingsTab(SettingsTab),
     /// Open a folder picker to choose where engines are installed.
     ChooseEngineDir,
     /// The engine install folder was picked, or the picker was cancelled.

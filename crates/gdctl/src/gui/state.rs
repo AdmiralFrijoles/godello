@@ -34,6 +34,39 @@ pub enum EnginesTab {
     Available,
 }
 
+/// Which group of settings the settings screen is showing. Each tab holds one
+/// related group, so the form stays short instead of one long scroll.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsTab {
+    Appearance,
+    Engines,
+    Projects,
+    Csharp,
+    Cache,
+}
+
+impl SettingsTab {
+    /// The tabs in the order they show, so the bar and the labels stay in sync.
+    pub const ALL: [SettingsTab; 5] = [
+        SettingsTab::Appearance,
+        SettingsTab::Engines,
+        SettingsTab::Projects,
+        SettingsTab::Csharp,
+        SettingsTab::Cache,
+    ];
+
+    /// The label shown on the tab.
+    pub fn label(self) -> &'static str {
+        match self {
+            SettingsTab::Appearance => "Appearance",
+            SettingsTab::Engines => "Engines",
+            SettingsTab::Projects => "Projects",
+            SettingsTab::Csharp => "C#",
+            SettingsTab::Cache => "Cache",
+        }
+    }
+}
+
 /// Which release channel the available list is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Channel {
@@ -119,6 +152,8 @@ pub struct App {
     pub ctx: Context,
     pub screen: Screen,
     pub theme: Theme,
+    /// Which group of settings the settings screen is showing.
+    pub settings_tab: SettingsTab,
 
     /// Toasts floating at the bottom of the window, newest last.
     pub toasts: Vec<Toast>,
@@ -274,6 +309,7 @@ impl App {
             ctx,
             screen: Screen::Projects,
             theme,
+            settings_tab: SettingsTab::Appearance,
             toasts: Vec::new(),
             next_toast_id: 0,
             toast_paused: false,

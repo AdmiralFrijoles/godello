@@ -161,6 +161,10 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
         }
 
         // Settings. Each change applies right away and saves to disk.
+        Message::SetSettingsTab(tab) => {
+            state.settings_tab = tab;
+            Task::none()
+        }
         Message::ChooseEngineDir => tasks::pick_engine_dir(),
         Message::EngineDirPicked(None) => Task::none(),
         Message::EngineDirPicked(Some(dir)) => {

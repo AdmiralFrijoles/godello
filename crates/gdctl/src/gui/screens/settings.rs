@@ -8,7 +8,7 @@ use godello_core::{CsharpBuildTool, Variant};
 use iced::widget::{Row, button, checkbox, column, container, pick_list, row, scrollable, text};
 use iced::{Alignment, Element, Length};
 
-use crate::gui::state::App;
+use crate::gui::state::{App, SettingsTab};
 use crate::gui::{Message, style, themes, widgets};
 
 /// The variants offered for the default variant setting.
@@ -16,16 +16,58 @@ const VARIANTS: [Variant; 2] = [Variant::Standard, Variant::Mono];
 /// The tools offered for the C# build setting.
 const BUILD_TOOLS: [CsharpBuildTool; 2] = [CsharpBuildTool::Godot, CsharpBuildTool::Dotnet];
 
-/// Build the settings screen from the current state.
+/// Build the settings screen from the current state. A tab bar picks one group
+/// of settings, and only that group's form shows below it.
 pub fn view(state: &App) -> Element<'_, Message> {
-    let settings = &state.ctx.settings;
+    let form = match state.settings_tab {
+        SettingsTab::Appearance => appearance(state),
+        SettingsTab::Engines => engines(state),
+        SettingsTab::Projects => projects(state),
+        SettingsTab::Csharp => csharp(state),
+        SettingsTab::Cache => cache(),
+    };
 
-    // Appearance.
+    column![
+        text("Settings").size(style::TEXT_TITLE),
+        tab_bar(state),
+        scrollable(container(form).padding([0.0, style::GAP_S]))
+            .spacing(style::GAP_S)
+            .height(Length::Fill),
+    ]
+    .spacing(style::GAP_M)
+    .height(Length::Fill)
+    .into()
+}
+
+/// The row of tabs across the top, one per group, with the current one marked.
+fn tab_bar(state: &App) -> Element<'_, Message> {
+    let mut bar = row![].spacing(style::GAP_XS);
+    for tab in SettingsTab::ALL {
+        bar = bar.push(
+            button(text(tab.label()))
+                .padding(style::BTN_PAD)
+                .style(style::segment(state.settings_tab == tab))
+                .on_press(Message::SetSettingsTab(tab)),
+        );
+    }
+    bar.into()
+}
+
+/// The appearance settings: the theme picker.
+fn appearance(state: &App) -> Element<'_, Message> {
     let theme_control = pick_list(themes(), Some(state.theme.clone()), Message::SetTheme)
         .style(style::pick_list)
         .into();
 
-    // Engines.
+    column![field("Theme", "The color theme of the app.", theme_control)]
+        .spacing(style::GAP_M)
+        .into()
+}
+
+/// The engine settings: install location, default variant, and prereleases.
+fn engines(state: &App) -> Element<'_, Message> {
+    let settings = &state.ctx.settings;
+
     let engines_dir = settings.effective_engines_dir(&state.ctx.paths);
     let custom_dir = settings.engine_install_dir.is_some();
     let mut dir_buttons = row![
@@ -62,7 +104,39 @@ pub fn view(state: &App) -> Element<'_, Message> {
     .spacing(style::GAP_M)
     .align_y(Alignment::Center);
 
-    // Projects.
+    let variant_control = pick_list(
+        &VARIANTS[..],
+        Some(settings.default_variant),
+        Message::SetDefaultVariant,
+    )
+    .style(style::pick_list)
+    .into();
+
+    let prereleases_control = checkbox(settings.include_prereleases)
+        .on_toggle(Message::SetIncludePrereleases)
+        .into();
+
+    column![
+        engine_dir,
+        field(
+            "Default variant",
+            "The build used when nothing else decides it.",
+            variant_control,
+        ),
+        field(
+            "Include prereleases",
+            "Offer release candidate, beta, and dev builds when resolving versions.",
+            prereleases_control,
+        ),
+    ]
+    .spacing(style::GAP_M)
+    .into()
+}
+
+/// The project settings: the default folder for new projects and clones.
+fn projects(state: &App) -> Element<'_, Message> {
+    let settings = &state.ctx.settings;
+
     let project_dir = match &settings.default_project_dir {
         Some(dir) => {
             let buttons = row![
@@ -99,19 +173,13 @@ pub fn view(state: &App) -> Element<'_, Message> {
         }
     };
 
-    let variant_control = pick_list(
-        &VARIANTS[..],
-        Some(settings.default_variant),
-        Message::SetDefaultVariant,
-    )
-    .style(style::pick_list)
-    .into();
+    column![project_dir].spacing(style::GAP_M).into()
+}
 
-    let prereleases_control = checkbox(settings.include_prereleases)
-        .on_toggle(Message::SetIncludePrereleases)
-        .into();
+/// The C# settings: whether to build before a launch and which tool builds it.
+fn csharp(state: &App) -> Element<'_, Message> {
+    let settings = &state.ctx.settings;
 
-    // C#.
     let build_control = checkbox(settings.build_csharp_before_launch)
         .on_toggle(Message::SetBuildCsharp)
         .into();
@@ -124,31 +192,7 @@ pub fn view(state: &App) -> Element<'_, Message> {
     .style(style::pick_list)
     .into();
 
-    // Cache.
-    let cache_control = button(text("Clear cache"))
-        .padding(style::BTN_PAD)
-        .style(style::button_secondary)
-        .on_press(Message::ClearCache)
-        .into();
-
-    let form = column![
-        heading("Appearance"),
-        field("Theme", "The color theme of the app.", theme_control),
-        heading("Engines"),
-        engine_dir,
-        field(
-            "Default variant",
-            "The build used when nothing else decides it.",
-            variant_control,
-        ),
-        field(
-            "Include prereleases",
-            "Offer release candidate, beta, and dev builds when resolving versions.",
-            prereleases_control,
-        ),
-        heading("Projects"),
-        project_dir,
-        heading("C#"),
+    column![
         field(
             "Build before launching",
             "Build the C# solution before opening or running a C# project.",
@@ -159,29 +203,26 @@ pub fn view(state: &App) -> Element<'_, Message> {
             "Build with the Godot editor, or with the dotnet command line tool.",
             tool_control,
         ),
-        heading("Cache"),
-        field(
-            "Version list cache",
-            "Available versions are cached to load faster. Clear it to fetch a fresh list next time.",
-            cache_control,
-        ),
-    ]
-    .spacing(style::GAP_M);
-
-    column![
-        text("Settings").size(style::TEXT_TITLE),
-        scrollable(container(form).padding([0.0, style::GAP_S]))
-            .spacing(style::GAP_S)
-            .height(Length::Fill),
     ]
     .spacing(style::GAP_M)
-    .height(Length::Fill)
     .into()
 }
 
-/// A section heading.
-fn heading(label: &str) -> Element<'_, Message> {
-    text(label.to_string()).size(style::TEXT_HEADING).into()
+/// The cache settings: clear the cached version list.
+fn cache() -> Element<'static, Message> {
+    let cache_control = button(text("Clear cache"))
+        .padding(style::BTN_PAD)
+        .style(style::button_secondary)
+        .on_press(Message::ClearCache)
+        .into();
+
+    column![field(
+        "Version list cache",
+        "Available versions are cached to load faster. Clear it to fetch a fresh list next time.",
+        cache_control,
+    )]
+    .spacing(style::GAP_M)
+    .into()
 }
 
 /// The default project folder row: a title and description on the left, the
