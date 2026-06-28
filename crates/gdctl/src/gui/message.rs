@@ -132,10 +132,10 @@ pub enum Message {
     },
 
     // Projects.
-    /// Open the native folder picker to add a project.
+    /// Open the native file picker to add a project by its project.godot file.
     AddProject,
-    /// The folder picker returned, with the chosen folder or nothing.
-    ProjectFolderPicked(Option<PathBuf>),
+    /// The file picker returned, with the chosen project.godot file or nothing.
+    ProjectFilePicked(Option<PathBuf>),
     /// Forget a project, removing it from the list but not from disk.
     RemoveProject(PathBuf),
     /// Open a project folder in the file manager.

@@ -24,16 +24,20 @@ use crate::gui::message::{LaunchFailure, Message};
 use crate::gui::progress::{ChannelProgress, ProgressEvent};
 use crate::net::WebClient;
 
-/// Open the native folder picker to add a project.
-pub fn pick_project_folder() -> Task<Message> {
+/// Open the native file picker to add a project by its project.godot file. The
+/// picker is filtered to the project file so the user points right at it, and the
+/// folder that holds it is the project.
+pub fn pick_project_file() -> Task<Message> {
     Task::perform(
         async {
             rfd::AsyncFileDialog::new()
-                .pick_folder()
+                .set_title("Select a project.godot file")
+                .add_filter("Godot project", &["godot"])
+                .pick_file()
                 .await
                 .map(|handle| handle.path().to_path_buf())
         },
-        Message::ProjectFolderPicked,
+        Message::ProjectFilePicked,
     )
 }
 

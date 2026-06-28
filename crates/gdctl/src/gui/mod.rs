@@ -368,11 +368,21 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
         }
 
         // Projects.
-        Message::AddProject => tasks::pick_project_folder(),
-        Message::ProjectFolderPicked(None) => Task::none(),
-        Message::ProjectFolderPicked(Some(dir)) => {
-            add_project(state, &dir);
-            reload_projects(state)
+        Message::AddProject => tasks::pick_project_file(),
+        Message::ProjectFilePicked(None) => Task::none(),
+        Message::ProjectFilePicked(Some(file)) => {
+            // The picker returns the project.godot file. The project is the folder
+            // that holds it.
+            match file.parent() {
+                Some(dir) => {
+                    add_project(state, dir);
+                    reload_projects(state)
+                }
+                None => {
+                    state.toast(ToastKind::Error, "That file has no folder.");
+                    Task::none()
+                }
+            }
         }
         Message::RemoveProject(dir) => {
             state.project_menu_open = None;

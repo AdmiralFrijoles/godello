@@ -57,8 +57,8 @@ The binary lands at target/release/gdctl.
 Run gdctl with no arguments to open the app. It has three screens:
 
 - Engines: install, remove, and open any version, released or prerelease.
-- Projects: add a folder or clone a repository, then edit, run, pin a version, or
-  update from git.
+- Projects: add a project by its project.godot file or clone a repository, then
+  edit, run, pin a version, or update from git.
 - Settings: theme, default variant, prereleases, the C# build, and where engines
   install.
 
