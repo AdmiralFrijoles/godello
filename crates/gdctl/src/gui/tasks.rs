@@ -11,9 +11,10 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use godello_core::{
-    EngineRepository, Git, GodotProject, GodotVersion, InstallManager, LaunchError, ProjectEntry,
-    ProjectList, Settings, SystemCommandRunner, SystemLauncher, Target, Variant, VersionControl,
-    VersionPattern, clone_destination, find_project_dir_in_tree, open_editor, run_project,
+    EngineRepository, Git, GodotProject, GodotVersion, InstallManager, LaunchError, LaunchPhase,
+    ProjectEntry, ProjectList, Settings, SystemCommandRunner, SystemLauncher, Target, Variant,
+    VersionControl, VersionPattern, clone_destination, find_project_dir_in_tree, open_editor,
+    run_project,
 };
 use iced::Task;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -93,25 +94,28 @@ pub fn launch_project(
 ) -> Task<Message> {
     let dir = project.dir.clone();
 
-    // The before launch hook fires after any C# build, just before the editor or
-    // project starts. We forward it as a phase message so the row can move from
-    // compiling to starting. The sender drops when the launch finishes, which ends
-    // this stream on its own.
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    // The phase hook fires after any C# build, as the launch moves through
+    // importing and then starting. We forward each phase as a message so the row
+    // can show the current step. The sender drops when the launch finishes, which
+    // ends this stream on its own.
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<LaunchPhase>();
     let phase_dir = dir.clone();
-    let phase = Task::run(UnboundedReceiverStream::new(rx), move |_| {
-        Message::LaunchStarting {
+    let phase = Task::run(UnboundedReceiverStream::new(rx), move |phase| match phase {
+        LaunchPhase::Importing => Message::LaunchImporting {
+            dir: phase_dir.clone(),
+        },
+        LaunchPhase::Starting => Message::LaunchStarting {
             dir: phase_dir.clone(),
             run,
-        }
+        },
     });
 
     let finish_dir = dir;
     let launch = Task::perform(
         async move {
             let joined = tokio::task::spawn_blocking(move || {
-                let starting = move || {
-                    let _ = tx.send(());
+                let on_phase = move |phase| {
+                    let _ = tx.send(phase);
                 };
                 let result = if run {
                     run_project(
@@ -120,7 +124,7 @@ pub fn launch_project(
                         &project,
                         &SystemCommandRunner,
                         &SystemLauncher,
-                        starting,
+                        on_phase,
                     )
                 } else {
                     open_editor(
@@ -129,7 +133,7 @@ pub fn launch_project(
                         &project,
                         &SystemCommandRunner,
                         &SystemLauncher,
-                        starting,
+                        on_phase,
                     )
                 };
                 // Keep a C# build failure distinct so an edit can offer to open
@@ -239,9 +243,9 @@ pub fn clone_repo(url: String, chosen: PathBuf, projects_file: PathBuf) -> Task<
                 git.clone_repo(&url, &dest).map_err(|err| err.to_string())?;
                 // The project.godot may sit in a subfolder of the repository, so
                 // search the cloned tree for it rather than only the top.
-                match find_project_dir_in_tree(&dest).and_then(|dir| {
-                    GodotProject::load(&dir).ok().map(|project| (dir, project))
-                }) {
+                match find_project_dir_in_tree(&dest)
+                    .and_then(|dir| GodotProject::load(&dir).ok().map(|project| (dir, project)))
+                {
                     Some((dir, project)) => {
                         let canonical = std::fs::canonicalize(&dir).unwrap_or(dir);
                         let mut list =

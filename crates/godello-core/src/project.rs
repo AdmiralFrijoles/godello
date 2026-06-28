@@ -86,20 +86,51 @@ impl GodotProject {
         self.main_branch.as_deref().unwrap_or(DEFAULT_MAIN_BRANCH)
     }
 
-    /// True when the project's resources have been imported at least once. The
-    /// editor writes imported data into a folder beside project.godot, so its
-    /// presence means an import has run. Godot 4 uses a .godot folder and Godot 3
-    /// uses a .import folder. The config version tells the two apart, and when it
-    /// is unknown either folder counts. A project that was never imported cannot
-    /// run, so a caller can import it first.
+    /// True when every importable asset has its generated files present, so the
+    /// project can run without a fresh import.
+    ///
+    /// Each importable asset keeps a sibling .import file that names the files
+    /// Godot generates for it in the import cache (under .godot/imported for Godot
+    /// 4, or .import for Godot 3). Those sidecars travel with the project but the
+    /// generated files do not, so a fresh checkout has the sidecars and none of
+    /// their outputs. The project is imported only when every output a sidecar
+    /// declares is on disk. The presence of the cache folder alone is not enough,
+    /// since it can exist while outputs are missing or were cleared. A project
+    /// with no importable assets has nothing to import, so it counts as imported.
     pub fn is_imported(&self) -> bool {
-        let godot = self.dir.join(".godot").is_dir();
-        let import = self.dir.join(".import").is_dir();
-        match self.config_version {
-            Some(version) if version >= 5 => godot,
-            Some(_) => import,
-            None => godot || import,
+        let mut queue: VecDeque<(PathBuf, usize)> = VecDeque::new();
+        queue.push_back((self.dir.clone(), 0));
+        while let Some((dir, depth)) = queue.pop_front() {
+            let Ok(entries) = fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    // The import cache and version control folders are hidden and
+                    // hold no sidecars, so the scan skips them.
+                    if depth < MAX_IMPORT_SCAN_DEPTH && !is_hidden(&path) {
+                        queue.push_back((path, depth + 1));
+                    }
+                    continue;
+                }
+                if path.extension().and_then(|ext| ext.to_str()) != Some("import") {
+                    continue;
+                }
+                // A sidecar we cannot read is treated as needing an import, since
+                // we cannot prove its outputs are present.
+                let Ok(text) = fs::read_to_string(&path) else {
+                    return false;
+                };
+                for output in imported_outputs(&text) {
+                    let relative = output.trim_start_matches("res://");
+                    if !self.dir.join(relative).exists() {
+                        return false;
+                    }
+                }
+            }
         }
+        true
     }
 
     /// The engine this project needs, as a version requirement and a variant.
@@ -145,6 +176,24 @@ pub fn find_project_dir(start: impl AsRef<Path>) -> Option<PathBuf> {
 /// How deep the downward search descends. A cloned repository keeps its project
 /// near the top, so a shallow bound finds it without walking a deep tree.
 const MAX_SEARCH_DEPTH: usize = 6;
+
+/// How deep the import scan descends from the project root. Assets can sit well
+/// below the top, for example under addons, so this is generous. It is only a
+/// guard against an unusually deep tree or a symlink loop.
+const MAX_IMPORT_SCAN_DEPTH: usize = 24;
+
+/// Pull the generated import outputs declared in a .import sidecar. These are the
+/// quoted res:// paths that point into the import cache, named by the path and
+/// dest_files keys. The source asset and the uid are left out, since only the
+/// generated files tell us whether an import has run.
+fn imported_outputs(text: &str) -> Vec<String> {
+    text.split('"')
+        .filter(|token| {
+            token.starts_with("res://.godot/imported/") || token.starts_with("res://.import/")
+        })
+        .map(|token| token.to_string())
+        .collect()
+}
 
 /// Search a folder and the folders under it for the first one that holds
 /// project.godot. The walk is breadth first, so the project nearest the top wins
@@ -737,51 +786,135 @@ run/main_scene="res://main.tscn"
 
     // Import detection.
 
-    #[test]
-    fn a_fresh_project_is_not_imported() {
-        let dir = scratch("import-none");
-        write_project(&dir, GODOT4);
-        let project = GodotProject::load(&dir).unwrap();
-        assert!(!project.is_imported());
+    /// Write a texture import sidecar that declares one generated output, the way
+    /// Godot 4 does, so a test can then choose to create the output or not.
+    fn write_sidecar(dir: &Path, asset: &str, output: &str) {
+        let body = format!(
+            "[remap]\n\npath=\"{output}\"\n\n[deps]\n\nsource_file=\"res://{asset}\"\ndest_files=[\"{output}\"]\n"
+        );
+        fs::write(dir.join(format!("{asset}.import")), body).unwrap();
     }
 
     #[test]
-    fn godot_4_is_imported_by_the_godot_folder() {
-        let dir = scratch("import-godot4");
+    fn a_project_with_no_assets_needs_no_import() {
+        // Nothing to import, so the project is ready to run as is.
+        let dir = scratch("import-no-assets");
         write_project(&dir, GODOT4);
-        fs::create_dir_all(dir.join(".godot")).unwrap();
         let project = GodotProject::load(&dir).unwrap();
         assert!(project.is_imported());
     }
 
     #[test]
-    fn godot_4_ignores_a_stray_godot_3_import_folder() {
-        // A config version 5 project only counts the .godot folder, so a leftover
-        // .import folder does not make it look imported.
-        let dir = scratch("import-godot4-stray");
+    fn a_missing_generated_output_means_not_imported() {
+        // The sidecar travels with the checkout but its output does not, which is
+        // exactly the fresh clone case.
+        let dir = scratch("import-missing-output");
         write_project(&dir, GODOT4);
-        fs::create_dir_all(dir.join(".import")).unwrap();
+        write_sidecar(
+            &dir,
+            "icon.svg",
+            "res://.godot/imported/icon.svg-abc123.ctex",
+        );
         let project = GodotProject::load(&dir).unwrap();
         assert!(!project.is_imported());
     }
 
     #[test]
-    fn godot_3_is_imported_by_the_import_folder() {
+    fn a_present_generated_output_means_imported() {
+        let dir = scratch("import-present-output");
+        write_project(&dir, GODOT4);
+        write_sidecar(
+            &dir,
+            "icon.svg",
+            "res://.godot/imported/icon.svg-abc123.ctex",
+        );
+        fs::create_dir_all(dir.join(".godot").join("imported")).unwrap();
+        fs::write(
+            dir.join(".godot")
+                .join("imported")
+                .join("icon.svg-abc123.ctex"),
+            b"",
+        )
+        .unwrap();
+        let project = GodotProject::load(&dir).unwrap();
+        assert!(project.is_imported());
+    }
+
+    #[test]
+    fn the_godot_folder_alone_is_not_enough() {
+        // A .godot folder can exist while an output is still missing. The old
+        // check was fooled by this, so guard against a regression.
+        let dir = scratch("import-godot-folder-only");
+        write_project(&dir, GODOT4);
+        write_sidecar(
+            &dir,
+            "icon.svg",
+            "res://.godot/imported/icon.svg-abc123.ctex",
+        );
+        fs::create_dir_all(dir.join(".godot").join("imported")).unwrap();
+        let project = GodotProject::load(&dir).unwrap();
+        assert!(!project.is_imported());
+    }
+
+    #[test]
+    fn a_nested_asset_output_is_checked() {
+        // Assets sit below the top, so the scan must reach a sidecar in a subfolder.
+        let dir = scratch("import-nested");
+        write_project(&dir, GODOT4);
+        let assets = dir.join("assets").join("sprites");
+        fs::create_dir_all(&assets).unwrap();
+        write_sidecar(
+            &assets,
+            "hero.png",
+            "res://.godot/imported/hero.png-deadbeef.ctex",
+        );
+        let project = GodotProject::load(&dir).unwrap();
+        assert!(!project.is_imported());
+    }
+
+    #[test]
+    fn a_godot_3_import_cache_is_recognized() {
         let dir = scratch("import-godot3");
         write_project(&dir, "config_version=4\n[application]\nconfig/name=\"X\"\n");
-        fs::create_dir_all(dir.join(".import")).unwrap();
+        write_sidecar(&dir, "icon.png", "res://.import/icon.png-feed.stex");
         let project = GodotProject::load(&dir).unwrap();
-        assert!(project.is_imported());
+        assert!(!project.is_imported());
+        fs::create_dir_all(dir.join(".import")).unwrap();
+        fs::write(dir.join(".import").join("icon.png-feed.stex"), b"").unwrap();
+        let imported = GodotProject::load(&dir).unwrap();
+        assert!(imported.is_imported());
     }
 
     #[test]
-    fn an_unknown_config_version_accepts_either_folder() {
-        let dir = scratch("import-unknown");
-        write_project(&dir, "config_version=oops\n[application]\nconfig/name=\"X\"\n");
-        fs::create_dir_all(dir.join(".import")).unwrap();
+    fn an_unreadable_sidecar_is_treated_as_needing_import() {
+        // imported_outputs sees no declared outputs in junk, so a sidecar with no
+        // parseable output does not falsely count as imported on its own. A real
+        // sidecar always names at least one output.
+        let dir = scratch("import-empty-sidecar");
+        write_project(&dir, GODOT4);
+        // A sidecar that declares an output the project never generated.
+        write_sidecar(
+            &dir,
+            "music.ogg",
+            "res://.godot/imported/music.ogg-1.oggvorbisstr",
+        );
         let project = GodotProject::load(&dir).unwrap();
-        assert!(project.config_version.is_none());
-        assert!(project.is_imported());
+        assert!(!project.is_imported());
+    }
+
+    #[test]
+    fn imported_outputs_pulls_only_cache_paths() {
+        let sidecar = "[remap]\n\npath=\"res://.godot/imported/icon.svg-abc.ctex\"\nuid=\"uid://xyz\"\n\n[deps]\n\nsource_file=\"res://icon.svg\"\ndest_files=[\"res://.godot/imported/icon.svg-abc.ctex\"]\n";
+        let outputs = imported_outputs(sidecar);
+        // Both the path and the dest_files entry are caught, and the source and uid
+        // are left out.
+        assert_eq!(
+            outputs,
+            vec![
+                "res://.godot/imported/icon.svg-abc.ctex".to_string(),
+                "res://.godot/imported/icon.svg-abc.ctex".to_string(),
+            ]
+        );
     }
 
     #[test]

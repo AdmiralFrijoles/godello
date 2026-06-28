@@ -434,7 +434,11 @@ mod tests {
     // Dotnet detection.
 
     fn exe_name() -> &'static str {
-        if cfg!(windows) { "dotnet.exe" } else { "dotnet" }
+        if cfg!(windows) {
+            "dotnet.exe"
+        } else {
+            "dotnet"
+        }
     }
 
     #[test]

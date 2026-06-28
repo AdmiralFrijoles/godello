@@ -10,10 +10,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, anyhow, bail};
 use godello_core::{
     BlockReason, DEFAULT_MAIN_BRANCH, EngineRepository, Git, GodotProject, GodotVersion,
-    LaunchError, NoProgress, ProjectList, RepoStatus, Settings, SyncState, SystemCommandRunner,
-    SystemLauncher, Target, UpdateOutcome, Variant, VersionControl, VersionPattern,
-    engine_for_project, find_project_dir, find_project_dir_in_tree, is_empty_dir, open_editor,
-    open_version, repo_name_from_url, run_project,
+    LaunchError, LaunchPhase, NoProgress, ProjectList, RepoStatus, Settings, SyncState,
+    SystemCommandRunner, SystemLauncher, Target, UpdateOutcome, Variant, VersionControl,
+    VersionPattern, engine_for_project, find_project_dir, find_project_dir_in_tree, is_empty_dir,
+    open_editor, open_version, repo_name_from_url, run_project,
 };
 
 use crate::cli::{Command, ProjectCommand, SettingsCommand};
@@ -409,7 +409,7 @@ async fn edit_project(
         &project,
         &SystemCommandRunner,
         &SystemLauncher,
-        || say!(ctx, "Opening the editor for {label}..."),
+        |_phase| say!(ctx, "Opening the editor for {label}..."),
     )
     .context("could not open the editor")?;
     Ok(())
@@ -434,7 +434,10 @@ async fn run_project_dir(
         &project,
         &SystemCommandRunner,
         &SystemLauncher,
-        || say!(ctx, "Running {label}..."),
+        |phase| match phase {
+            LaunchPhase::Importing => say!(ctx, "Importing {label}..."),
+            LaunchPhase::Starting => say!(ctx, "Running {label}..."),
+        },
     )
     .context("could not run the project")?;
     Ok(())
@@ -510,9 +513,9 @@ async fn clone(ctx: &Context, url: &str, dir: Option<PathBuf>) -> Result<()> {
     // Add it as a project when it has a project.godot. The file may sit in a
     // subfolder of the repository, so search the cloned tree for it. A repo
     // without one is still cloned, it just is not tracked.
-    match find_project_dir_in_tree(&dest).and_then(|dir| {
-        GodotProject::load(&dir).ok().map(|project| (dir, project))
-    }) {
+    match find_project_dir_in_tree(&dest)
+        .and_then(|dir| GodotProject::load(&dir).ok().map(|project| (dir, project)))
+    {
         Some((project_dir, project)) => {
             let canonical = std::fs::canonicalize(&project_dir).unwrap_or(project_dir);
             let file = ctx.paths.projects_file();

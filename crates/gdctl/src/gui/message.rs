@@ -154,8 +154,11 @@ pub enum Message {
     CloseProjectMenu,
     /// Open the editor (run false) or run the project (run true).
     LaunchProject { dir: PathBuf, run: bool },
-    /// Any C# build is done and the editor or project is about to start. Moves the
-    /// project row from compiling to starting.
+    /// A run is importing the project's resources before it starts. Moves the
+    /// project row to importing. Only a run with resources not ready raises this.
+    LaunchImporting { dir: PathBuf },
+    /// Any C# build and import is done and the editor or project is about to
+    /// start. Moves the project row to starting.
     LaunchStarting { dir: PathBuf, run: bool },
     /// A launch finished, with success or a failure. Carries the project and what
     /// was being done so the row can stop working and a C# build failure on an

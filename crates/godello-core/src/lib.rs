@@ -25,8 +25,8 @@ pub use install::{
     DownloadProgress, Downloader, InstallError, InstallManager, InstalledEngine, NoProgress,
 };
 pub use launch::{
-    LaunchError, Launcher, SystemLauncher, engine_for_project, file_manager_program, open_editor,
-    open_path, open_version, run_project,
+    LaunchError, LaunchPhase, Launcher, SystemLauncher, engine_for_project, file_manager_program,
+    open_editor, open_path, open_version, run_project,
 };
 pub use platform::{Arch, Os, PlatformError, Target};
 pub use process::{CommandOutcome, CommandRunner, ProcessError, SystemCommandRunner};

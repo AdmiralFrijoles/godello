@@ -472,6 +472,16 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
             state.project_menu_open = None;
             prepare_launch(state, dir, run)
         }
+        Message::LaunchImporting { dir } => {
+            // Only move a project that is still shown as working, in case the row
+            // was already cleared.
+            if state.project_activity.contains_key(&dir) {
+                state
+                    .project_activity
+                    .insert(dir, ProjectActivity::Importing);
+            }
+            Task::none()
+        }
         Message::LaunchStarting { dir, run } => {
             // Only move a project that is still shown as working, in case the row
             // was already cleared.

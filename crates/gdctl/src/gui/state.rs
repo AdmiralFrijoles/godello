@@ -219,6 +219,8 @@ pub enum ProjectActivity {
     InstallingEngine,
     /// Building the C# solution before the launch.
     Compiling,
+    /// Importing the project's resources before a run, when they are not ready.
+    Importing,
     /// Starting the editor or the project, after any install and build.
     Launching { run: bool },
 }
@@ -229,6 +231,7 @@ impl ProjectActivity {
         match self {
             ProjectActivity::InstallingEngine => "Installing engine...",
             ProjectActivity::Compiling => "Compiling C#...",
+            ProjectActivity::Importing => "Importing assets...",
             ProjectActivity::Launching { run: true } => "Starting the project...",
             ProjectActivity::Launching { run: false } => "Opening the editor...",
         }

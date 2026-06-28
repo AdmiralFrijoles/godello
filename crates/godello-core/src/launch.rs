@@ -134,24 +134,35 @@ fn project_variant(project: &GodotProject) -> Variant {
     }
 }
 
+/// A step a launch passes through after any C# build, so a caller can show what
+/// is happening. Importing only happens for a run whose resources are not ready.
+/// Starting fires just before the editor or project starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchPhase {
+    /// Importing the project's resources before it can run.
+    Importing,
+    /// About to start the editor or the project, after any build and import.
+    Starting,
+}
+
 /// Open the editor for a project. Builds the C# solution first when the project
 /// uses C# and the setting is on.
 ///
-/// The before_launch hook runs after any build and just before the editor
-/// starts, so a caller can report the build and the launch as separate steps. It
-/// does not run when the build fails.
+/// The on_phase hook reports each step after any build, so a caller can show the
+/// build and the launch as separate steps. It does not run when the build fails.
+/// Opening the editor imports on its own, so this only reports the starting step.
 pub fn open_editor(
     manager: &InstallManager,
     settings: &Settings,
     project: &GodotProject,
     runner: &impl CommandRunner,
     launcher: &impl Launcher,
-    before_launch: impl FnOnce(),
+    on_phase: impl Fn(LaunchPhase),
 ) -> Result<(), LaunchError> {
     let (version, variant) = engine_for_project(manager, project)?;
     let editor = manager.executable(variant, version, false)?;
     maybe_build_csharp(settings, project, &editor, runner)?;
-    before_launch();
+    on_phase(LaunchPhase::Starting);
     let args = vec![
         OsString::from("--path"),
         project.dir.as_os_str().to_os_string(),
@@ -163,15 +174,16 @@ pub fn open_editor(
 /// Run a project without opening the editor. A C# project is still built first so
 /// its assemblies are ready.
 ///
-/// The before_launch hook runs after any build and just before the project
-/// starts, the same as in open_editor.
+/// The on_phase hook reports each step after any build. A project whose resources
+/// are not imported yet reports the importing step while that runs, then the
+/// starting step just before the project starts, the same as in open_editor.
 pub fn run_project(
     manager: &InstallManager,
     settings: &Settings,
     project: &GodotProject,
     runner: &impl CommandRunner,
     launcher: &impl Launcher,
-    before_launch: impl FnOnce(),
+    on_phase: impl Fn(LaunchPhase),
 ) -> Result<(), LaunchError> {
     let (version, variant) = engine_for_project(manager, project)?;
     let editor = manager.executable(variant, version, false)?;
@@ -180,8 +192,11 @@ pub fn run_project(
     // running it would fail. Import them first and wait for that to finish. This
     // runs after any C# build, which opens the editor and so imports on its own,
     // in which case there is nothing left to do here.
-    import_if_needed(project, &editor, runner)?;
-    before_launch();
+    if !project.is_imported() {
+        on_phase(LaunchPhase::Importing);
+        import_project(project, &editor, runner)?;
+    }
+    on_phase(LaunchPhase::Starting);
     let args = vec![
         OsString::from("--path"),
         project.dir.as_os_str().to_os_string(),
@@ -189,18 +204,15 @@ pub fn run_project(
     launcher.launch(editor.as_os_str(), &args, settings.launch_detached)
 }
 
-/// Import a project's resources when they are not present yet. This opens the
-/// editor headless with the import flag, which imports and then exits on its own,
-/// and waits for it through the command runner so the run that follows has its
-/// resources ready. An already imported project is left alone.
-fn import_if_needed(
+/// Import a project's resources. This opens the editor headless with the import
+/// flag, which imports and then exits on its own, and waits for it through the
+/// command runner so the run that follows has its resources ready. The caller
+/// imports only when the project needs it.
+fn import_project(
     project: &GodotProject,
     editor: &Path,
     runner: &impl CommandRunner,
 ) -> Result<(), LaunchError> {
-    if project.is_imported() {
-        return Ok(());
-    }
     let args = vec![
         OsString::from("--path"),
         project.dir.as_os_str().to_os_string(),
@@ -307,7 +319,10 @@ impl std::fmt::Display for LaunchError {
                 if output.is_empty() {
                     write!(f, "the project import failed with exit code {code}")
                 } else {
-                    write!(f, "the project import failed with exit code {code}:\n{output}")
+                    write!(
+                        f,
+                        "the project import failed with exit code {code}:\n{output}"
+                    )
                 }
             }
             LaunchError::ProgramNotFound(program) => {
@@ -553,7 +568,7 @@ mod tests {
             &project,
             &runner,
             &launcher,
-            || {},
+            |_| {},
         )
         .unwrap();
 
@@ -582,13 +597,27 @@ mod tests {
             &project,
             &runner,
             &launcher,
-            || {},
+            |_| {},
         )
         .unwrap();
 
         let (_program, args, _detached) = launcher.last();
         assert!(args.contains(&OsString::from("--path")));
         assert!(!args.contains(&OsString::from("--editor")));
+    }
+
+    /// Write a texture import sidecar declaring one generated output, and create
+    /// that output when present is true. This sets up a project that either needs
+    /// an import or does not.
+    fn write_import_state(dir: &Path, present: bool) {
+        let output = "res://.godot/imported/icon.svg-abc123.ctex";
+        let body = format!("[remap]\n\npath=\"{output}\"\n\n[deps]\n\ndest_files=[\"{output}\"]\n");
+        fs::write(dir.join("icon.svg.import"), body).unwrap();
+        if present {
+            let imported = dir.join(".godot").join("imported");
+            fs::create_dir_all(&imported).unwrap();
+            fs::write(imported.join("icon.svg-abc123.ctex"), b"").unwrap();
+        }
     }
 
     #[test]
@@ -598,6 +627,8 @@ mod tests {
         let manager = InstallManager::new(&root, root.join("dl"));
         let proj_dir = scratch("import-needed-proj");
         let project = write_project(&proj_dir, PLAIN);
+        // An asset whose imported output is missing, so a run must import first.
+        write_import_state(&proj_dir, false);
         let runner = FakeRunner::new();
         let launcher = FakeLauncher::new();
         run_project(
@@ -606,12 +637,15 @@ mod tests {
             &project,
             &runner,
             &launcher,
-            || {},
+            |_| {},
         )
         .unwrap();
 
         // The import ran headless with the import flag pointed at the project.
-        assert!(runner.ran(), "an unimported project should be imported first");
+        assert!(
+            runner.ran(),
+            "an unimported project should be imported first"
+        );
         let args = runner.last_args();
         assert!(args.contains(&OsString::from("--import")));
         assert!(args.contains(&OsString::from("--headless")));
@@ -628,8 +662,8 @@ mod tests {
         let manager = InstallManager::new(&root, root.join("dl"));
         let proj_dir = scratch("import-skip-proj");
         let project = write_project(&proj_dir, PLAIN);
-        // A .godot folder means the project was already imported.
-        fs::create_dir_all(proj_dir.join(".godot")).unwrap();
+        // The asset's imported output is present, so no import is needed.
+        write_import_state(&proj_dir, true);
         let runner = FakeRunner::new();
         let launcher = FakeLauncher::new();
         run_project(
@@ -638,7 +672,7 @@ mod tests {
             &project,
             &runner,
             &launcher,
-            || {},
+            |_| {},
         )
         .unwrap();
 
@@ -657,24 +691,28 @@ mod tests {
         let manager = InstallManager::new(&root, root.join("dl"));
         let proj_dir = scratch("import-fail-proj");
         let project = write_project(&proj_dir, PLAIN);
+        // A missing output makes the run attempt an import, which then fails.
+        write_import_state(&proj_dir, false);
         let runner = FakeRunner::failing();
         let launcher = FakeLauncher::new();
-        let hook_ran = RefCell::new(false);
+        let phases = RefCell::new(Vec::new());
         let result = run_project(
             &manager,
             &Settings::default(),
             &project,
             &runner,
             &launcher,
-            || {
-                *hook_ran.borrow_mut() = true;
+            |phase| {
+                phases.borrow_mut().push(phase);
             },
         );
         assert!(matches!(result, Err(LaunchError::ImportFailed { .. })));
         // The project must not run when the import failed.
         assert_eq!(launcher.count(), 0);
-        // The before launch hook must not fire when the import failed.
-        assert!(!*hook_ran.borrow());
+        // The importing phase is reported, but the starting phase must not fire
+        // once the import has failed.
+        assert!(phases.borrow().contains(&LaunchPhase::Importing));
+        assert!(!phases.borrow().contains(&LaunchPhase::Starting));
     }
 
     #[test]
@@ -710,7 +748,7 @@ mod tests {
             ..Settings::default()
         };
         let launcher = FakeLauncher::new();
-        open_editor(&manager, &settings, &project, &runner, &launcher, || {}).unwrap();
+        open_editor(&manager, &settings, &project, &runner, &launcher, |_| {}).unwrap();
         let (_program, _args, detached) = launcher.last();
         assert!(detached, "the setting should make the launch detached");
     }
@@ -733,7 +771,7 @@ mod tests {
             &project,
             &runner,
             &launcher,
-            || {
+            |_| {
                 *built_before_hook.borrow_mut() = runner.ran();
             },
         )
@@ -759,7 +797,7 @@ mod tests {
         };
         let runner = FakeRunner::new();
         let launcher = FakeLauncher::new();
-        open_editor(&manager, &settings, &project, &runner, &launcher, || {}).unwrap();
+        open_editor(&manager, &settings, &project, &runner, &launcher, |_| {}).unwrap();
         assert!(!runner.ran(), "the build should be skipped");
         assert_eq!(launcher.count(), 1);
     }
@@ -780,14 +818,14 @@ mod tests {
             &project,
             &runner,
             &launcher,
-            || {
+            |_| {
                 *hook_ran.borrow_mut() = true;
             },
         );
         assert!(matches!(result, Err(LaunchError::Csharp(_))));
         // The editor must not start when the build failed.
         assert_eq!(launcher.count(), 0);
-        // The before launch hook must not fire when the build failed.
+        // No phase fires when the build failed.
         assert!(!*hook_ran.borrow());
     }
 
