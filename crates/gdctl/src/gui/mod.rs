@@ -74,9 +74,20 @@ pub fn launch(ctx: crate::context::Context) -> iced::Result {
     .window(iced::window::Settings {
         size: Size::new(1024.0, 620.0),
         min_size: Some(Size::new(1024.0, 620.0)),
+        icon: window_icon(),
         ..iced::window::Settings::default()
     })
     .run()
+}
+
+/// The app icon for the window title bar and the task switcher. The image is
+/// baked into the binary so it travels with it. A decode failure just means no
+/// icon, which is not worth failing the launch over.
+fn window_icon() -> Option<iced::window::Icon> {
+    let bytes = include_bytes!("../../../../packaging/godello.png");
+    let image = image::load_from_memory(bytes).ok()?.into_rgba8();
+    let (width, height) = image.dimensions();
+    iced::window::icon::from_rgba(image.into_raw(), width, height).ok()
 }
 
 /// The timers the app needs: the toast countdown while toasts are showing, and a

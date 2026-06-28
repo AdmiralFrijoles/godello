@@ -18,6 +18,7 @@ anyhow = { workspace = true }
 clap = { workspace = true }
 iced = { workspace = true }
 iced_aw = { workspace = true }
+image = { workspace = true }
 indicatif = { workspace = true }
 reqwest = { workspace = true }
 rfd = { workspace = true }

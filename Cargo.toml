@@ -18,6 +18,7 @@ godello-core = { path = "crates/godello-core" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 directories = "5"
+image = { version = "0.25", default-features = false, features = ["png"] }
 iced = { version = "0.14", features = ["tokio", "svg"] }
 iced_aw = { version = "0.14", default-features = false, features = ["drop_down", "spinner"] }
 indicatif = "0.17"
