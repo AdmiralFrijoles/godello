@@ -171,7 +171,8 @@ fn installing_row(job: &InstallJob) -> Element<'_, Message> {
     // The version, then an "Installing" label beside the progress bar or spinner,
     // so the row reads clearly as an install in progress.
     let name = column![
-        text(job.version.to_tag()).size(style::TEXT_HEADING),
+        text(format!("{} {}", job.version.to_tag(), job.variant.as_str()))
+            .size(style::TEXT_HEADING),
         row![
             text("Installing").size(style::TEXT_CAPTION),
             widgets::install_indicator(job, Length::Fill),
@@ -191,7 +192,7 @@ fn installing_row(job: &InstallJob) -> Element<'_, Message> {
         });
 
     container(
-        row![name, variant_pill(job.variant), cancel]
+        row![name, cancel]
             .spacing(style::GAP_M)
             .align_y(Alignment::Center),
     )
@@ -210,7 +211,7 @@ fn installed_row<'a>(
     menu_open: bool,
 ) -> Element<'a, Message> {
     let name = column![
-        text(version.to_tag()).size(style::TEXT_HEADING),
+        text(format!("{} {}", version.to_tag(), variant.as_str())).size(style::TEXT_HEADING),
         widgets::path_label(path),
     ]
     .spacing(style::GAP_XS)
@@ -231,7 +232,7 @@ fn installed_row<'a>(
         .on_dismiss(Message::CloseEngineMenu);
 
     container(
-        row![name, variant_pill(variant), menu]
+        row![name, menu]
             .spacing(style::GAP_M)
             .align_y(Alignment::Center),
     )
@@ -272,14 +273,6 @@ fn menu_item<'a>(label: &'a str, danger: bool, message: Message) -> Element<'a, 
         .width(Length::Fill)
         .style(style::menu_item(danger))
         .on_press(message)
-        .into()
-}
-
-/// A small chip showing the variant.
-fn variant_pill<'a>(variant: Variant) -> Element<'a, Message> {
-    container(text(variant.as_str().to_string()).size(style::TEXT_CAPTION))
-        .padding([2.0, style::GAP_S])
-        .style(style::badge)
         .into()
 }
 

@@ -854,11 +854,17 @@ fn pin_choices(state: &App, dir: &Path) -> (Vec<PinChoice>, Option<PinChoice>) {
     });
     let detected = project.and_then(|project| project.pinned_version.or(project.feature_version));
 
+    // The variant follows the project, so show it after the version like the
+    // engines list does. It is blank when the project's variant is not known.
+    let variant_suffix = variant
+        .map(|variant| format!(" {}", variant.as_str()))
+        .unwrap_or_default();
+
     let mut choices: Vec<PinChoice> = Vec::new();
     if let Some(pattern) = detected {
         choices.push(PinChoice {
             pattern,
-            label: format!("{pattern}  (suggested)"),
+            label: format!("{pattern}{variant_suffix}  (suggested)"),
         });
     }
 
@@ -878,7 +884,7 @@ fn pin_choices(state: &App, dir: &Path) -> (Vec<PinChoice>, Option<PinChoice>) {
                 }
                 choices.push(PinChoice {
                     pattern,
-                    label: version.to_tag(),
+                    label: format!("{}{}", version.to_tag(), variant_suffix),
                 });
             }
         }
