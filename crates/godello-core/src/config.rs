@@ -5,6 +5,7 @@
 //! file still works. Engines are large, so on Windows they go under the local app
 //! data path rather than the roaming one.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -12,6 +13,7 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 use crate::csharp::CsharpBuildTool;
+use crate::tools::Tool;
 use crate::version::Variant;
 
 /// The resolved folders Godello uses. The config dir holds settings. The data dir
@@ -103,6 +105,10 @@ pub struct Settings {
     /// The color theme the desktop app opens with. A short name the app maps to
     /// one of its themes. The command line ignores this.
     pub theme: String,
+    /// The paths to external tools, keyed by a short tool name. Found on startup
+    /// and kept here so they are remembered. A tool that is not found is left out.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tools: BTreeMap<String, PathBuf>,
 }
 
 impl Default for Settings {
@@ -117,6 +123,7 @@ impl Default for Settings {
             launch_detached: false,
             close_on_launch: true,
             theme: "dark".to_string(),
+            tools: BTreeMap::new(),
         }
     }
 }
@@ -177,6 +184,24 @@ impl Settings {
         self.engine_install_dir
             .clone()
             .unwrap_or_else(|| paths.default_engines_dir())
+    }
+
+    /// The stored path for a tool, if one is set.
+    pub fn tool_path(&self, tool: Tool) -> Option<&Path> {
+        self.tools.get(tool.key()).map(PathBuf::as_path)
+    }
+
+    /// Set or clear the stored path for a tool. None removes it, so a tool that is
+    /// not found is left out of the saved file rather than stored as blank.
+    pub fn set_tool_path(&mut self, tool: Tool, path: Option<PathBuf>) {
+        match path {
+            Some(path) => {
+                self.tools.insert(tool.key().to_string(), path);
+            }
+            None => {
+                self.tools.remove(tool.key());
+            }
+        }
     }
 
     /// Read a setting by name as text. Returns None for an unknown name, or for
@@ -442,6 +467,35 @@ mod tests {
         assert!(!settings.launch_detached);
         assert!(settings.close_on_launch);
         assert_eq!(settings.theme, "dark");
+        assert!(settings.tools.is_empty());
+    }
+
+    #[test]
+    fn tool_paths_set_clear_and_round_trip() {
+        use crate::tools::Tool;
+        let dir = scratch("settings-tools");
+        let path = dir.join("settings.toml");
+        let mut settings = Settings::default();
+        assert_eq!(settings.tool_path(Tool::Git), None);
+
+        settings.set_tool_path(Tool::Git, Some(PathBuf::from("/usr/bin/git")));
+        assert_eq!(
+            settings.tool_path(Tool::Git),
+            Some(Path::new("/usr/bin/git"))
+        );
+
+        settings.save(&path).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("[tools]"));
+        assert!(text.contains("git = \"/usr/bin/git\""));
+        assert_eq!(Settings::load(&path).unwrap(), settings);
+
+        // Clearing removes it, and an empty map is not written back.
+        settings.set_tool_path(Tool::Git, None);
+        assert_eq!(settings.tool_path(Tool::Git), None);
+        settings.save(&path).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("[tools]"));
     }
 
     #[test]

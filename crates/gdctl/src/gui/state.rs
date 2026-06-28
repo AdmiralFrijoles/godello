@@ -42,16 +42,18 @@ pub enum SettingsTab {
     Engines,
     Projects,
     Csharp,
+    Tools,
     Cache,
 }
 
 impl SettingsTab {
     /// The tabs in the order they show, so the bar and the labels stay in sync.
-    pub const ALL: [SettingsTab; 5] = [
+    pub const ALL: [SettingsTab; 6] = [
         SettingsTab::General,
         SettingsTab::Engines,
         SettingsTab::Projects,
         SettingsTab::Csharp,
+        SettingsTab::Tools,
         SettingsTab::Cache,
     ];
 
@@ -62,6 +64,7 @@ impl SettingsTab {
             SettingsTab::Engines => "Engines",
             SettingsTab::Projects => "Projects",
             SettingsTab::Csharp => "C#",
+            SettingsTab::Tools => "Tools",
             SettingsTab::Cache => "Cache",
         }
     }

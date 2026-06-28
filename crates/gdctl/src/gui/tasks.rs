@@ -12,9 +12,9 @@ use std::sync::atomic::AtomicBool;
 
 use godello_core::{
     EngineRepository, Git, GodotProject, GodotVersion, InstallManager, LaunchError, LaunchPhase,
-    ProjectEntry, ProjectList, Settings, SystemCommandRunner, SystemLauncher, Target, Variant,
-    VersionControl, VersionPattern, clone_destination, find_project_dir_in_tree, open_editor,
-    run_project,
+    ProjectEntry, ProjectList, Settings, SystemCommandRunner, SystemLauncher, Target, Tool,
+    Variant, VersionControl, VersionPattern, clone_destination, find_project_dir_in_tree,
+    open_editor, run_project,
 };
 use iced::Task;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -53,6 +53,20 @@ pub fn pick_project_dir() -> Task<Message> {
                 .map(|handle| handle.path().to_path_buf())
         },
         Message::ProjectDirPicked,
+    )
+}
+
+/// Open the native file picker to set a tool's executable path by hand.
+pub fn pick_tool_path(tool: Tool) -> Task<Message> {
+    Task::perform(
+        async {
+            rfd::AsyncFileDialog::new()
+                .set_title("Choose the tool executable")
+                .pick_file()
+                .await
+                .map(|handle| handle.path().to_path_buf())
+        },
+        move |path| Message::ToolPathPicked(tool, path),
     )
 }
 

@@ -5,7 +5,7 @@
 //! repository rather than wiring those up themselves.
 
 use anyhow::{Context as _, Result, anyhow};
-use godello_core::{GodotGitHubRepository, InstallManager, Paths, Settings};
+use godello_core::{GodotGitHubRepository, InstallManager, Paths, Settings, resolve_tools};
 
 use crate::interaction::Interaction;
 use crate::net::WebClient;
@@ -34,7 +34,7 @@ impl Context {
     pub fn load(yes: bool, silent: bool) -> Result<Self> {
         let paths = Paths::discover().context("could not resolve the application folders")?;
         let settings_file = paths.settings_file();
-        let settings = if settings_file.exists() {
+        let mut settings = if settings_file.exists() {
             Settings::load(&settings_file).context("could not load the settings")?
         } else {
             // First run. Pick sensible defaults from what the system has, such as
@@ -45,6 +45,12 @@ impl Context {
             let _ = settings.save(&settings_file);
             settings
         };
+        // Find the external tools on startup. A stored path that still exists is
+        // kept, otherwise we search for the tool again, otherwise it is left blank.
+        // Save only when something changed so an unchanged start does no writes.
+        if resolve_tools(&mut settings) {
+            let _ = settings.save(&settings_file);
+        }
         let client =
             WebClient::new().map_err(|err| anyhow!("could not start the network client: {err}"))?;
         Ok(Context {

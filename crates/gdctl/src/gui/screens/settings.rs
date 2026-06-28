@@ -4,7 +4,9 @@
 //! Every control applies its change right away and saves to disk, so there is no
 //! separate apply or revert step.
 
-use godello_core::{CsharpBuildTool, Variant};
+use std::path::Path;
+
+use godello_core::{CsharpBuildTool, Tool, Variant};
 use iced::widget::{Row, button, checkbox, column, container, pick_list, row, scrollable, text};
 use iced::{Alignment, Element, Length};
 
@@ -24,6 +26,7 @@ pub fn view(state: &App) -> Element<'_, Message> {
         SettingsTab::Engines => engines(state),
         SettingsTab::Projects => projects(state),
         SettingsTab::Csharp => csharp(state),
+        SettingsTab::Tools => tools(state),
         SettingsTab::Cache => cache(),
     };
 
@@ -217,6 +220,66 @@ fn csharp(state: &App) -> Element<'_, Message> {
     ]
     .spacing(style::GAP_M)
     .into()
+}
+
+/// The tools settings: one row per tracked tool with its detected path and the
+/// controls to detect, set, or clear it.
+fn tools(state: &App) -> Element<'_, Message> {
+    let mut col = column![
+        text(
+            "Paths to tools the app can use. These are found on startup. Set one by \
+         hand if it is somewhere unusual."
+        )
+        .size(style::TEXT_CAPTION)
+        .style(style::muted_text)
+    ]
+    .spacing(style::GAP_M);
+    for tool in Tool::ALL {
+        col = col.push(tool_row(tool, state.ctx.settings.tool_path(tool)));
+    }
+    col.into()
+}
+
+/// One tool row: the name and its path on the left, the detect, choose, and clear
+/// controls on the right. Clear only shows when a path is set.
+fn tool_row(tool: Tool, path: Option<&Path>) -> Element<'static, Message> {
+    let mut buttons = row![
+        button(text("Detect"))
+            .padding(style::BTN_PAD)
+            .style(style::button_secondary)
+            .on_press(Message::DetectTool(tool)),
+        button(text("Choose..."))
+            .padding(style::BTN_PAD)
+            .style(style::button_secondary)
+            .on_press(Message::ChooseToolPath(tool)),
+    ]
+    .spacing(style::GAP_S)
+    .align_y(Alignment::Center);
+    if path.is_some() {
+        buttons = buttons.push(
+            button(text("Clear"))
+                .padding(style::BTN_PAD)
+                .style(style::button_tertiary)
+                .on_press(Message::ClearToolPath(tool)),
+        );
+    }
+
+    let mut info = column![text(tool.label().to_string()).size(style::TEXT_BODY)]
+        .spacing(style::GAP_XS)
+        .width(Length::Fill);
+    info = match path {
+        Some(path) => info.push(widgets::path_label(path.display().to_string())),
+        None => info.push(
+            text("Not found")
+                .size(style::TEXT_CAPTION)
+                .style(style::muted_text),
+        ),
+    };
+
+    row![info, buttons]
+        .spacing(style::GAP_M)
+        .align_y(Alignment::Center)
+        .into()
 }
 
 /// The cache settings: clear the cached version list.

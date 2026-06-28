@@ -14,6 +14,7 @@ pub mod platform;
 pub mod process;
 pub mod project;
 pub mod repository;
+pub mod tools;
 pub mod vcs;
 pub mod version;
 
@@ -34,6 +35,7 @@ pub use project::{GodotProject, ProjectError, find_project_dir, find_project_dir
 pub use repository::{
     Asset, Checksum, ChecksumAlgorithm, EngineRepository, HttpClient, Release, RepositoryError,
 };
+pub use tools::{Tool, find_tool, open_in_tool, resolve_tool, resolve_tools};
 pub use vcs::{
     BlockReason, DEFAULT_MAIN_BRANCH, RepoStatus, SyncState, UpdateOutcome, VcsError,
     VersionControl, clone_destination, is_empty_dir, repo_name_from_url,

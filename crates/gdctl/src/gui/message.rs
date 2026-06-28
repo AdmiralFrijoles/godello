@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 
 use godello_core::{
-    CsharpBuildTool, GodotVersion, ProjectEntry, Release, RepoStatus, UpdateOutcome, Variant,
+    CsharpBuildTool, GodotVersion, ProjectEntry, Release, RepoStatus, Tool, UpdateOutcome, Variant,
 };
 use iced::Theme;
 
@@ -79,6 +79,14 @@ pub enum Message {
     /// Set whether the launcher closes after it launches a project or opens the
     /// project manager.
     SetCloseOnLaunch(bool),
+    /// Search for a tool now and store its path if found.
+    DetectTool(Tool),
+    /// Open a file picker to set a tool's path by hand.
+    ChooseToolPath(Tool),
+    /// The tool path picker returned, with the chosen file or nothing.
+    ToolPathPicked(Tool, Option<PathBuf>),
+    /// Clear a tool's stored path.
+    ClearToolPath(Tool),
 
     /// Switch between the installed and available lists.
     SetEnginesTab(EnginesTab),
@@ -151,6 +159,8 @@ pub enum Message {
     RemoveProject(PathBuf),
     /// Open a project folder in the file manager.
     OpenProjectFolder(PathBuf),
+    /// Open a project in an external editor.
+    OpenInTool { dir: PathBuf, tool: Tool },
     /// Open or close the row menu for a project.
     ToggleProjectMenu(PathBuf),
     /// Close any open project row menu.

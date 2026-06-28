@@ -30,7 +30,8 @@ use iced::{Alignment, Color, Element, Length, Size, Subscription, Task, Theme};
 
 use godello_core::{
     BlockReason, GodotProject, GodotVersion, LaunchError, ProjectList, SystemLauncher,
-    UpdateOutcome, Variant, VersionPattern, engine_for_project, open_path, open_version,
+    UpdateOutcome, Variant, VersionPattern, engine_for_project, find_tool, open_in_tool, open_path,
+    open_version,
 };
 
 use message::LaunchFailure;
@@ -229,6 +230,35 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
         }
         Message::SetCloseOnLaunch(on) => {
             state.ctx.settings.close_on_launch = on;
+            save_settings(state);
+            Task::none()
+        }
+        Message::DetectTool(tool) => {
+            // A quick local search, so it runs inline.
+            match find_tool(tool) {
+                Some(path) => {
+                    state.ctx.settings.set_tool_path(tool, Some(path));
+                    save_settings(state);
+                    state.toast(ToastKind::Info, format!("Found {}.", tool.label()));
+                }
+                None => {
+                    state.toast(
+                        ToastKind::Error,
+                        format!("Could not find {}.", tool.label()),
+                    );
+                }
+            }
+            Task::none()
+        }
+        Message::ChooseToolPath(tool) => tasks::pick_tool_path(tool),
+        Message::ToolPathPicked(_tool, None) => Task::none(),
+        Message::ToolPathPicked(tool, Some(path)) => {
+            state.ctx.settings.set_tool_path(tool, Some(path));
+            save_settings(state);
+            Task::none()
+        }
+        Message::ClearToolPath(tool) => {
+            state.ctx.settings.set_tool_path(tool, None);
             save_settings(state);
             Task::none()
         }
@@ -467,6 +497,32 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
                     ToastKind::Error,
                     format!("Could not open the folder: {err}"),
                 );
+            }
+            Task::none()
+        }
+        Message::OpenInTool { dir, tool } => {
+            state.project_menu_open = None;
+            // Clone the stored path so the settings borrow ends before a toast.
+            let program = state.ctx.settings.tool_path(tool).map(Path::to_path_buf);
+            match program {
+                Some(program) => match open_in_tool(tool, &program, &dir, &SystemLauncher) {
+                    Ok(()) => {
+                        // The editor opened detached, so the launcher can close now
+                        // without disturbing it, when the user asked for that.
+                        if state.ctx.settings.close_on_launch {
+                            return iced::exit();
+                        }
+                    }
+                    Err(err) => {
+                        state.toast(
+                            ToastKind::Error,
+                            format!("Could not open {}: {err}", tool.label()),
+                        );
+                    }
+                },
+                None => {
+                    state.toast(ToastKind::Error, format!("{} is not set up.", tool.label()));
+                }
             }
             Task::none()
         }

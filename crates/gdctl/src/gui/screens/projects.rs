@@ -7,7 +7,9 @@
 
 use std::path::Path;
 
-use godello_core::{GodotProject, ProjectEntry, RepoStatus, SyncState, Variant, VersionPattern};
+use godello_core::{
+    GodotProject, ProjectEntry, RepoStatus, SyncState, Tool, Variant, VersionPattern,
+};
 use iced::widget::{button, column, container, row, scrollable, space, text, tooltip};
 use iced::{Alignment, Element, Length};
 use iced_aw::{DropDown, Spinner, drop_down};
@@ -139,11 +141,15 @@ fn project_row<'a>(state: &'a App, entry: &'a ProjectEntry) -> Element<'a, Messa
         .padding(style::BTN_PAD_COMPACT)
         .style(style::button_tertiary)
         .on_press(Message::ToggleProjectMenu(dir.clone()));
-    let menu = DropDown::new(menu_button, project_menu(&dir, is_repo), menu_open)
-        .width(Length::Fixed(MENU_WIDTH))
-        .alignment(drop_down::Alignment::BottomEnd)
-        .offset([0.0, style::GAP_XS])
-        .on_dismiss(Message::CloseProjectMenu);
+    let menu = DropDown::new(
+        menu_button,
+        project_menu(state, &dir, project, is_repo),
+        menu_open,
+    )
+    .width(Length::Fixed(MENU_WIDTH))
+    .alignment(drop_down::Alignment::BottomEnd)
+    .offset([0.0, style::GAP_XS])
+    .on_dismiss(Message::CloseProjectMenu);
 
     let mut content = row![name].spacing(style::GAP_S).align_y(Alignment::Center);
 
@@ -195,8 +201,15 @@ fn busy_indicator<'a>(label: &'a str) -> Element<'a, Message> {
     .into()
 }
 
-/// The dropdown menu for a project.
-fn project_menu<'a>(dir: &Path, is_repo: bool) -> Element<'a, Message> {
+/// The dropdown menu for a project. The open in editor entries are added for the
+/// editors that are installed, with the .NET focused ones shown only when the
+/// project uses C#.
+fn project_menu<'a>(
+    state: &App,
+    dir: &Path,
+    project: Option<&GodotProject>,
+    is_repo: bool,
+) -> Element<'a, Message> {
     let dir = dir.to_path_buf();
     let mut items = column![
         menu_item(
@@ -228,6 +241,26 @@ fn project_menu<'a>(dir: &Path, is_repo: bool) -> Element<'a, Message> {
     ]
     .spacing(style::GAP_XS);
 
+    let uses_csharp = project.map(|p| p.uses_csharp).unwrap_or(false);
+    for tool in Tool::EDITORS {
+        // Skip an editor that is not set up, and a .NET focused one when the
+        // project has no solution.
+        if state.ctx.settings.tool_path(tool).is_none() {
+            continue;
+        }
+        if tool.needs_csharp() && !uses_csharp {
+            continue;
+        }
+        items = items.push(menu_item(
+            format!("Open in {}", tool.label()),
+            false,
+            Message::OpenInTool {
+                dir: dir.clone(),
+                tool,
+            },
+        ));
+    }
+
     if is_repo {
         items = items.push(menu_item(
             "Update from remote",
@@ -246,13 +279,17 @@ fn project_menu<'a>(dir: &Path, is_repo: bool) -> Element<'a, Message> {
 }
 
 /// One full width menu row. The danger flag colors a destructive item.
-fn menu_item<'a>(label: &'a str, danger: bool, message: Message) -> Element<'a, Message> {
-    button(text(label).size(style::TEXT_BODY).width(Length::Fill))
-        .padding(style::BTN_PAD_COMPACT)
-        .width(Length::Fill)
-        .style(style::menu_item(danger))
-        .on_press(message)
-        .into()
+fn menu_item<'a>(label: impl Into<String>, danger: bool, message: Message) -> Element<'a, Message> {
+    button(
+        text(label.into())
+            .size(style::TEXT_BODY)
+            .width(Length::Fill),
+    )
+    .padding(style::BTN_PAD_COMPACT)
+    .width(Length::Fill)
+    .style(style::menu_item(danger))
+    .on_press(message)
+    .into()
 }
 
 /// A pill showing the engine the project needs, or that it names none. When the
