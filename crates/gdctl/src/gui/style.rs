@@ -190,13 +190,7 @@ pub enum BadgeTone {
 /// the status reads clearly while staying quiet against the background.
 pub fn badge_right(tone: BadgeTone) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
-        let palette = theme.extended_palette();
-        let hue = match tone {
-            BadgeTone::Info => palette.primary.base.color,
-            BadgeTone::Success => palette.success.base.color,
-            BadgeTone::Warning => palette.warning.base.color,
-            BadgeTone::Danger => palette.danger.base.color,
-        };
+        let hue = tone_hue(theme, tone);
         container::Style {
             background: Some(badge_fill(theme, hue).into()),
             text_color: Some(badge_label(theme, hue)),
@@ -209,6 +203,32 @@ pub fn badge_right(tone: BadgeTone) -> impl Fn(&Theme) -> container::Style {
             },
             ..container::Style::default()
         }
+    }
+}
+
+/// A full pill in a status tone, the colored cousin of badge. Used for a state
+/// that needs attention on its own, such as an engine a project needs but does
+/// not have.
+pub fn badge_toned(tone: BadgeTone) -> impl Fn(&Theme) -> container::Style {
+    move |theme| {
+        let hue = tone_hue(theme, tone);
+        container::Style {
+            background: Some(badge_fill(theme, hue).into()),
+            text_color: Some(badge_label(theme, hue)),
+            border: border::rounded(RADIUS_PILL),
+            ..container::Style::default()
+        }
+    }
+}
+
+/// The hue that marks a status tone, taken from the palette.
+fn tone_hue(theme: &Theme, tone: BadgeTone) -> Color {
+    let palette = theme.extended_palette();
+    match tone {
+        BadgeTone::Info => palette.primary.base.color,
+        BadgeTone::Success => palette.success.base.color,
+        BadgeTone::Warning => palette.warning.base.color,
+        BadgeTone::Danger => palette.danger.base.color,
     }
 }
 

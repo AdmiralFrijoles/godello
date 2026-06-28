@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use godello_core::{GodotProject, ProjectEntry, RepoStatus, SyncState};
+use godello_core::{GodotProject, ProjectEntry, RepoStatus, SyncState, Variant, VersionPattern};
 use iced::widget::{button, column, container, row, scrollable, space, text, tooltip};
 use iced::{Alignment, Element, Length};
 use iced_aw::{DropDown, Spinner, drop_down};
@@ -83,7 +83,7 @@ fn project_row<'a>(state: &'a App, entry: &'a ProjectEntry) -> Element<'a, Messa
 
     match project {
         Some(project) => {
-            badges = badges.push(engine_badge(project));
+            badges = badges.push(engine_badge(state, project));
             if project.uses_csharp {
                 badges = badges.push(pill("C#"));
             }
@@ -226,12 +226,34 @@ fn menu_item<'a>(label: &'a str, danger: bool, message: Message) -> Element<'a, 
         .into()
 }
 
-/// A pill showing the engine the project needs, or that it names none.
-fn engine_badge<'a>(project: &GodotProject) -> Element<'a, Message> {
+/// A pill showing the engine the project needs, or that it names none. When the
+/// project names a version that is not installed the pill turns to the danger
+/// tone, so a missing engine stands out.
+fn engine_badge<'a>(state: &App, project: &GodotProject) -> Element<'a, Message> {
     match project.required_engine() {
-        Some((pattern, variant)) => pill(format!("{pattern} {variant}")),
+        Some((pattern, variant)) => {
+            let label = format!("{pattern} {variant}");
+            if engine_missing(state, &pattern, variant) {
+                toned_pill(label, style::BadgeTone::Danger)
+            } else {
+                pill(label)
+            }
+        }
         None => pill("no engine set"),
     }
+}
+
+/// True when the installed list is loaded and holds no engine matching the
+/// version and variant. While the list is still loading the answer is false, so
+/// the pill does not flash an error before the engines are known.
+fn engine_missing(state: &App, pattern: &VersionPattern, variant: Variant) -> bool {
+    matches!(
+        &state.installed,
+        Load::Loaded(engines)
+            if !engines.iter().any(|engine| {
+                engine.variant == variant && pattern.matches(&engine.version)
+            })
+    )
 }
 
 /// A short version control status: the badge label, the tone that colors it, and
@@ -276,6 +298,14 @@ fn pill<'a>(label: impl Into<String>) -> Element<'a, Message> {
     container(text(label.into()).size(style::TEXT_CAPTION))
         .padding([2.0, style::GAP_S])
         .style(style::badge)
+        .into()
+}
+
+/// A small rounded pill in a status tone, for a state that needs attention.
+fn toned_pill<'a>(label: impl Into<String>, tone: style::BadgeTone) -> Element<'a, Message> {
+    container(text(label.into()).size(style::TEXT_CAPTION))
+        .padding([2.0, style::GAP_S])
+        .style(style::badge_toned(tone))
         .into()
 }
 
