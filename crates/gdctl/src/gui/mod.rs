@@ -124,7 +124,9 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::SetTheme(theme) => {
+            state.ctx.settings.theme = theme::name_of(&theme).to_string();
             state.theme = theme;
+            save_settings(state);
             Task::none()
         }
         Message::CopyPath(path) => {

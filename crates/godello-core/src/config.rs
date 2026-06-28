@@ -93,6 +93,9 @@ pub struct Settings {
     /// Start the editor or project detached so the command returns right away.
     /// When off, the command stays attached and waits for the editor to close.
     pub launch_detached: bool,
+    /// The color theme the desktop app opens with. A short name the app maps to
+    /// one of its themes. The command line ignores this.
+    pub theme: String,
 }
 
 impl Default for Settings {
@@ -104,6 +107,7 @@ impl Default for Settings {
             include_prereleases: false,
             default_variant: Variant::Standard,
             launch_detached: false,
+            theme: "dark".to_string(),
         }
     }
 }
@@ -118,6 +122,7 @@ impl Settings {
         "include_prereleases",
         "default_variant",
         "launch_detached",
+        "theme",
     ];
 
     /// Load settings from a file. A missing file gives the defaults.
@@ -165,6 +170,7 @@ impl Settings {
             "include_prereleases" => Some(self.include_prereleases.to_string()),
             "default_variant" => Some(self.default_variant.to_string()),
             "launch_detached" => Some(self.launch_detached.to_string()),
+            "theme" => Some(self.theme.clone()),
             _ => None,
         }
     }
@@ -194,6 +200,16 @@ impl Settings {
             }
             "launch_detached" => {
                 self.launch_detached = parse_bool(key, value)?;
+            }
+            "theme" => {
+                let name = value.trim();
+                if name.is_empty() {
+                    return Err(ConfigError::InvalidValue {
+                        key: key.to_string(),
+                        value: value.to_string(),
+                    });
+                }
+                self.theme = name.to_ascii_lowercase();
             }
             "default_variant" => {
                 self.default_variant = value.parse().map_err(|_| ConfigError::InvalidValue {
@@ -386,6 +402,7 @@ mod tests {
         assert_eq!(settings.default_variant, Variant::Standard);
         assert_eq!(settings.engine_install_dir, None);
         assert!(!settings.launch_detached);
+        assert_eq!(settings.theme, "dark");
     }
 
     #[test]
@@ -577,6 +594,38 @@ mod tests {
         );
         settings.set_field("engine_install_dir", "").unwrap();
         assert_eq!(settings.engine_install_dir, None);
+    }
+
+    #[test]
+    fn set_field_sets_theme_and_lowercases() {
+        let mut settings = Settings::default();
+        settings.set_field("theme", "Light").unwrap();
+        assert_eq!(settings.theme, "light");
+        assert_eq!(settings.get_field("theme").as_deref(), Some("light"));
+    }
+
+    #[test]
+    fn set_field_rejects_an_empty_theme() {
+        let mut settings = Settings::default();
+        assert!(matches!(
+            settings.set_field("theme", "   "),
+            Err(ConfigError::InvalidValue { .. })
+        ));
+    }
+
+    #[test]
+    fn theme_round_trips_and_unknown_name_is_kept() {
+        let dir = scratch("settings-theme");
+        let path = dir.join("settings.toml");
+        // An unknown name is stored as is. The desktop app decides how to map it,
+        // so the config layer does not police the value beyond it being present.
+        let settings = Settings {
+            theme: "midnight".to_string(),
+            ..Settings::default()
+        };
+        settings.save(&path).unwrap();
+        let loaded = Settings::load(&path).unwrap();
+        assert_eq!(loaded.theme, "midnight");
     }
 
     #[test]

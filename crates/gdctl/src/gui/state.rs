@@ -261,13 +261,14 @@ pub struct CompileWarning {
 }
 
 impl App {
-    /// Build the starting state from the shared context. The theme starts dark
-    /// and the available list opens on the released channel.
+    /// Build the starting state from the shared context. The theme comes from the
+    /// saved settings and the available list opens on the released channel.
     pub fn new(ctx: Context) -> Self {
+        let theme = theme::by_name(&ctx.settings.theme);
         App {
             ctx,
             screen: Screen::Projects,
-            theme: theme::dark(),
+            theme,
             toasts: Vec::new(),
             next_toast_id: 0,
             toast_paused: false,

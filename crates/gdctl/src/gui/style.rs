@@ -92,24 +92,73 @@ pub fn card(theme: &Theme) -> container::Style {
     }
 }
 
-/// A small pill that marks a variant or a state. A quiet neutral fill.
-pub fn badge(theme: &Theme) -> container::Style {
+/// Linear blend of two colors, from `a` at t zero to `b` at t one. Used to tint
+/// a surface with a hint of another color without taking on its full strength.
+fn mix(a: Color, b: Color, t: f32) -> Color {
+    Color {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: 1.0,
+    }
+}
+
+/// A soft tint of a color over the canvas, at the given strength. Pills use this
+/// so they read as calm chips with a hint of color rather than a full strength
+/// fill that pops against the background.
+fn tint(theme: &Theme, color: Color, strength: f32) -> Color {
+    mix(
+        theme.extended_palette().background.base.color,
+        color,
+        strength,
+    )
+}
+
+/// How strongly a pill is tinted. Every pill stays faint, so none pops against
+/// the background. A pill carries its color in the label, not a strong fill,
+/// which is the calm look modern tools use and which keeps a bright hue from
+/// muddying when it is washed over the canvas.
+const BADGE_TINT: f32 = 0.22;
+
+/// The shared fill for a pill of a given hue. A faint tint of the hue over the
+/// canvas, so the pill is a calm chip and the colored label does the talking.
+fn badge_fill(theme: &Theme, hue: Color) -> Color {
+    tint(theme, hue, BADGE_TINT)
+}
+
+/// A readable label color for a soft pill. On a dark theme the hue is lifted
+/// toward white so it stays bright on the faint fill. On a light theme it is
+/// pushed toward the text color so a light hue, such as amber, stays legible
+/// rather than washing out.
+fn badge_label(theme: &Theme, hue: Color) -> Color {
     let palette = theme.extended_palette();
+    if palette.is_dark {
+        mix(hue, Color::WHITE, 0.35)
+    } else {
+        mix(hue, palette.background.base.text, 0.4)
+    }
+}
+
+/// A small pill that marks a variant or a state. A faint accent tint with an
+/// accent label, the plain member of the pill family.
+pub fn badge(theme: &Theme) -> container::Style {
+    let hue = theme.extended_palette().primary.base.color;
     container::Style {
-        background: Some(palette.secondary.weak.color.into()),
-        text_color: Some(palette.secondary.weak.text),
+        background: Some(badge_fill(theme, hue).into()),
+        text_color: Some(badge_label(theme, hue)),
         border: border::rounded(RADIUS_PILL),
         ..container::Style::default()
     }
 }
 
 /// The left half of a joined pill pair. Only the left corners are rounded, so it
-/// sits flush against the right half and the two read as one pill.
+/// sits flush against the right half and the two read as one pill. It is the
+/// plain accent pill, so the colored right half reads as the status.
 pub fn badge_left(theme: &Theme) -> container::Style {
-    let palette = theme.extended_palette();
+    let hue = theme.extended_palette().primary.base.color;
     container::Style {
-        background: Some(palette.secondary.weak.color.into()),
-        text_color: Some(palette.secondary.weak.text),
+        background: Some(badge_fill(theme, hue).into()),
+        text_color: Some(badge_label(theme, hue)),
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,
@@ -121,9 +170,9 @@ pub fn badge_left(theme: &Theme) -> container::Style {
     }
 }
 
-/// Which palette color tints the right half of a status pill. Every status picks
-/// one of these, none of them the neutral of the left half, so the two tone pair
-/// is always visible.
+/// Which palette color marks the right half of a status pill. Each status picks
+/// one, so the colored label and faint tint set it apart from the neutral left
+/// half.
 #[derive(Debug, Clone, Copy)]
 pub enum BadgeTone {
     /// A calm informational state, the accent color.
@@ -136,21 +185,21 @@ pub enum BadgeTone {
     Danger,
 }
 
-/// The right half of a joined pill pair. Only the right corners are rounded. The
-/// tone tints it so each status reads as its own color, distinct from the neutral
-/// left half.
+/// The right half of a joined pill pair. Only the right corners are rounded. It
+/// carries the status color in its label over a faint tint of the same hue, so
+/// the status reads clearly while staying quiet against the background.
 pub fn badge_right(tone: BadgeTone) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
         let palette = theme.extended_palette();
-        let pair = match tone {
-            BadgeTone::Info => palette.primary.weak,
-            BadgeTone::Success => palette.success.weak,
-            BadgeTone::Warning => palette.warning.weak,
-            BadgeTone::Danger => palette.danger.weak,
+        let hue = match tone {
+            BadgeTone::Info => palette.primary.base.color,
+            BadgeTone::Success => palette.success.base.color,
+            BadgeTone::Warning => palette.warning.base.color,
+            BadgeTone::Danger => palette.danger.base.color,
         };
         container::Style {
-            background: Some(pair.color.into()),
-            text_color: Some(pair.text),
+            background: Some(badge_fill(theme, hue).into()),
+            text_color: Some(badge_label(theme, hue)),
             border: Border {
                 color: Color::TRANSPARENT,
                 width: 0.0,
