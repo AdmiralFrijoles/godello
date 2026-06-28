@@ -13,7 +13,7 @@ use std::sync::atomic::AtomicBool;
 use godello_core::{
     EngineRepository, Git, GodotProject, GodotVersion, InstallManager, LaunchError, ProjectEntry,
     ProjectList, Settings, SystemCommandRunner, SystemLauncher, Target, Variant, VersionControl,
-    VersionPattern, open_editor, run_project,
+    VersionPattern, clone_destination, find_project_dir_in_tree, open_editor, run_project,
 };
 use iced::Task;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -54,16 +54,18 @@ pub fn pick_engine_dir() -> Task<Message> {
     )
 }
 
-/// Open the native folder picker to choose where to clone, carrying the url.
-pub fn pick_clone_destination(url: String) -> Task<Message> {
+/// Open the native folder picker to choose where a clone goes. The result fills
+/// in the clone dialog rather than starting the clone.
+pub fn pick_clone_dir() -> Task<Message> {
     Task::perform(
         async {
             rfd::AsyncFileDialog::new()
+                .set_title("Choose a folder to clone into")
                 .pick_folder()
                 .await
                 .map(|handle| handle.path().to_path_buf())
         },
-        move |dest| Message::CloneDestinationPicked { url, dest },
+        Message::CloneDirPicked,
     )
 }
 
@@ -210,17 +212,24 @@ pub fn update_project(dir: PathBuf, main_branch: String) -> Task<Message> {
     )
 }
 
-/// Clone a repository into a destination, then add it as a project when it has a
-/// project.godot. Returns the added entry, or None when there was no project.
-pub fn clone_repo(url: String, dest: PathBuf, projects_file: PathBuf) -> Task<Message> {
+/// Clone a repository into the chosen folder, then add it as a project when it
+/// has a project.godot. Returns the added entry, or None when there was no
+/// project. When the chosen folder already holds files the clone goes into a
+/// subfolder named after the repository, so it does not mix with what is there.
+pub fn clone_repo(url: String, chosen: PathBuf, projects_file: PathBuf) -> Task<Message> {
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
+                let dest = clone_destination(&url, &chosen);
                 let git = Git::new(SystemCommandRunner);
                 git.clone_repo(&url, &dest).map_err(|err| err.to_string())?;
-                match GodotProject::load(&dest) {
-                    Ok(project) => {
-                        let canonical = std::fs::canonicalize(&dest).unwrap_or(dest);
+                // The project.godot may sit in a subfolder of the repository, so
+                // search the cloned tree for it rather than only the top.
+                match find_project_dir_in_tree(&dest).and_then(|dir| {
+                    GodotProject::load(&dir).ok().map(|project| (dir, project))
+                }) {
+                    Some((dir, project)) => {
+                        let canonical = std::fs::canonicalize(&dir).unwrap_or(dir);
                         let mut list =
                             ProjectList::load(&projects_file).map_err(|err| err.to_string())?;
                         list.add(&canonical, project.name.clone());
@@ -230,7 +239,7 @@ pub fn clone_repo(url: String, dest: PathBuf, projects_file: PathBuf) -> Task<Me
                             name: project.name,
                         }))
                     }
-                    Err(_) => Ok(None),
+                    None => Ok(None),
                 }
             })
             .await

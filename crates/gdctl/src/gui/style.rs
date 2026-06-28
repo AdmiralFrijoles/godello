@@ -409,6 +409,19 @@ pub fn menu_item(danger: bool) -> impl Fn(&Theme, button::Status) -> button::Sty
     }
 }
 
+/// Muted text for hints and secondary detail. A dimmed take on the normal text
+/// color, so it reads as a quiet aside next to full strength text.
+pub fn muted_text(theme: &Theme) -> iced::widget::text::Style {
+    let palette = theme.extended_palette();
+    iced::widget::text::Style {
+        color: Some(mix(
+            palette.background.base.text,
+            palette.background.base.color,
+            0.45,
+        )),
+    }
+}
+
 /// A text input that matches the button corner radius. Otherwise the iced
 /// default look for the theme.
 pub fn text_input(theme: &Theme, status: text_input_widget::Status) -> text_input_widget::Style {

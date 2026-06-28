@@ -230,10 +230,12 @@ pub struct InstallOffer {
     pub run: bool,
 }
 
-/// The clone a repository dialog.
+/// The clone a repository dialog. It holds the url and the folder to clone into,
+/// both chosen before the clone starts.
 #[derive(Debug, Clone, Default)]
 pub struct CloneDialog {
     pub url: String,
+    pub dest: Option<PathBuf>,
 }
 
 /// A launch waiting on an install to finish.

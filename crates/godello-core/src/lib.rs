@@ -30,13 +30,13 @@ pub use launch::{
 };
 pub use platform::{Arch, Os, PlatformError, Target};
 pub use process::{CommandOutcome, CommandRunner, ProcessError, SystemCommandRunner};
-pub use project::{GodotProject, ProjectError, find_project_dir};
+pub use project::{GodotProject, ProjectError, find_project_dir, find_project_dir_in_tree};
 pub use repository::{
     Asset, Checksum, ChecksumAlgorithm, EngineRepository, HttpClient, Release, RepositoryError,
 };
 pub use vcs::{
     BlockReason, DEFAULT_MAIN_BRANCH, RepoStatus, SyncState, UpdateOutcome, VcsError,
-    VersionControl,
+    VersionControl, clone_destination, is_empty_dir, repo_name_from_url,
 };
 pub use version::{GodotVersion, Stage, Variant, VersionParseError, VersionPattern};
 

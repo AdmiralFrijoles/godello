@@ -633,24 +633,28 @@ fn update(state: &mut App, message: Message) -> Task<Message> {
             state.clone_dialog = None;
             Task::none()
         }
+        Message::ChooseCloneDir => tasks::pick_clone_dir(),
+        Message::CloneDirPicked(None) => Task::none(),
+        Message::CloneDirPicked(Some(dir)) => {
+            if let Some(dialog) = &mut state.clone_dialog {
+                dialog.dest = Some(dir);
+            }
+            Task::none()
+        }
         Message::StartClone => {
-            let Some(dialog) = state.clone_dialog.take() else {
+            let Some(dialog) = state.clone_dialog.as_ref() else {
                 return Task::none();
             };
             let url = dialog.url.trim().to_string();
-            if url.is_empty() {
-                state.toast(ToastKind::Error, "Enter a repository url.");
+            // The clone button is disabled until both are set. A submit from the
+            // text box can still land here, so guard and keep the dialog open.
+            let (Some(dest), false) = (dialog.dest.clone(), url.is_empty()) else {
                 return Task::none();
-            }
-            tasks::pick_clone_destination(url)
+            };
+            state.clone_dialog = None;
+            state.toast(ToastKind::Info, "Cloning...");
+            tasks::clone_repo(url, dest, state.ctx.paths.projects_file())
         }
-        Message::CloneDestinationPicked { url, dest } => match dest {
-            Some(dest) => {
-                state.toast(ToastKind::Info, "Cloning...");
-                tasks::clone_repo(url, dest, state.ctx.paths.projects_file())
-            }
-            None => Task::none(),
-        },
         Message::Cloned(Ok(entry)) => {
             match entry {
                 Some(_) => state.toast(ToastKind::Info, "Cloned and added the project."),
@@ -1232,16 +1236,36 @@ fn pin_dialog<'a>(editor: &'a PinEditor) -> Element<'a, Message> {
 
 /// The clone dialog for cloning a repository as a new project.
 fn clone_dialog_view<'a>(dialog: &CloneDialog) -> Element<'a, Message> {
+    // The clone button is enabled only once a url and a folder are both set.
+    let can_clone = !dialog.url.trim().is_empty() && dialog.dest.is_some();
     let actions = row![
         space::horizontal(),
         button(text("Cancel"))
             .padding(style::BTN_PAD)
             .style(style::button_secondary)
             .on_press(Message::CancelClone),
-        button(text("Choose folder and clone"))
+        button(text("Clone"))
             .padding(style::BTN_PAD)
             .style(style::button_primary)
-            .on_press(Message::StartClone),
+            .on_press_maybe(can_clone.then_some(Message::StartClone)),
+    ]
+    .spacing(style::GAP_S)
+    .align_y(Alignment::Center);
+
+    // The chosen folder, or a hint when none is picked yet.
+    let dest_label: Element<'a, Message> = match &dialog.dest {
+        Some(dest) => widgets::path_label(dest.display().to_string()),
+        None => text("No folder chosen yet.")
+            .size(style::TEXT_CAPTION)
+            .style(style::muted_text)
+            .into(),
+    };
+    let dest_row = row![
+        button(text("Choose folder"))
+            .padding(style::BTN_PAD)
+            .style(style::button_secondary)
+            .on_press(Message::ChooseCloneDir),
+        dest_label,
     ]
     .spacing(style::GAP_S)
     .align_y(Alignment::Center);
@@ -1249,13 +1273,14 @@ fn clone_dialog_view<'a>(dialog: &CloneDialog) -> Element<'a, Message> {
     container(
         column![
             text("Clone a repository").size(style::TEXT_HEADING),
-            text("Enter a git url. You pick the destination folder next.")
+            text("Enter a git url and choose a folder to clone into. If the folder is not empty, the clone goes into a new subfolder named after the repository.")
                 .size(style::TEXT_CAPTION),
             text_input("https://example.com/game.git", &dialog.url)
                 .on_input(Message::CloneUrlChanged)
                 .on_submit(Message::StartClone)
                 .style(style::text_input)
                 .width(Length::Fill),
+            dest_row,
             actions,
         ]
         .spacing(style::GAP_M),

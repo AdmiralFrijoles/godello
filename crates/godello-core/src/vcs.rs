@@ -13,6 +13,40 @@ use crate::process::ProcessError;
 /// repositories use this name for the line of work everyone shares.
 pub const DEFAULT_MAIN_BRANCH: &str = "main";
 
+/// True when a folder is missing or holds no entries. A missing folder counts as
+/// empty, since a clone can create it.
+pub fn is_empty_dir(dir: &Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|mut entries| entries.next().is_none())
+        .unwrap_or(true)
+}
+
+/// Derive a folder name from a repository url. Drops a trailing slash and a
+/// trailing .git, and takes the last path or host segment. Falls back to a plain
+/// name when nothing usable is left.
+pub fn repo_name_from_url(url: &str) -> String {
+    let trimmed = url.trim_end_matches('/');
+    let last = trimmed.rsplit(['/', ':']).next().unwrap_or(trimmed);
+    let name = last.strip_suffix(".git").unwrap_or(last);
+    if name.is_empty() {
+        "repository".to_string()
+    } else {
+        name.to_string()
+    }
+}
+
+/// Work out where a clone should land under a chosen folder. When the folder is
+/// missing or empty the clone goes straight into it. When it already holds files
+/// a subfolder named after the repository is used, so the clone does not mix with
+/// what is already there.
+pub fn clone_destination(url: &str, chosen: &Path) -> PathBuf {
+    if is_empty_dir(chosen) {
+        chosen.to_path_buf()
+    } else {
+        chosen.join(repo_name_from_url(url))
+    }
+}
+
 /// How a working copy compares to its tracked remote. Some systems give exact
 /// commit counts and some only give a coarse state, so the counts are optional.
 /// A centralized system can never be Ahead, since its commits go straight to the
@@ -160,5 +194,71 @@ impl From<ProcessError> for VcsError {
             ProcessError::ProgramNotFound(_) => VcsError::NotInstalled,
             other => VcsError::Process(other),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join("godello-vcs-tests").join(name);
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn repo_name_handles_common_forms() {
+        assert_eq!(
+            repo_name_from_url("https://host.test/owner/game.git"),
+            "game"
+        );
+        assert_eq!(repo_name_from_url("https://host.test/owner/game"), "game");
+        assert_eq!(repo_name_from_url("https://host.test/owner/game/"), "game");
+        assert_eq!(repo_name_from_url("git@host.test:owner/game.git"), "game");
+        assert_eq!(repo_name_from_url("game"), "game");
+    }
+
+    #[test]
+    fn repo_name_falls_back_when_empty() {
+        // A url that trims down to nothing usable still gives a safe name.
+        assert_eq!(repo_name_from_url("https://host.test/"), "host.test");
+        assert_eq!(repo_name_from_url(".git"), "repository");
+        assert_eq!(repo_name_from_url("/"), "repository");
+    }
+
+    #[test]
+    fn is_empty_dir_reports_contents() {
+        let dir = scratch("empty");
+        assert!(is_empty_dir(&dir));
+        fs::write(dir.join("a.txt"), "x").unwrap();
+        assert!(!is_empty_dir(&dir));
+    }
+
+    #[test]
+    fn missing_dir_counts_as_empty() {
+        // A folder that does not exist is treated as empty so a clone can make it.
+        let dir = scratch("missing").join("not-there");
+        assert!(is_empty_dir(&dir));
+    }
+
+    #[test]
+    fn clone_destination_uses_chosen_when_empty_or_missing() {
+        let url = "https://host.test/owner/game.git";
+        let empty = scratch("dest-empty");
+        assert_eq!(clone_destination(url, &empty), empty);
+
+        let missing = scratch("dest-missing").join("new");
+        assert_eq!(clone_destination(url, &missing), missing);
+    }
+
+    #[test]
+    fn clone_destination_adds_a_subfolder_when_not_empty() {
+        let url = "https://host.test/owner/game.git";
+        let used = scratch("dest-used");
+        fs::write(used.join("README"), "x").unwrap();
+        assert_eq!(clone_destination(url, &used), used.join("game"));
     }
 }

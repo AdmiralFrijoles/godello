@@ -12,7 +12,8 @@ use godello_core::{
     BlockReason, DEFAULT_MAIN_BRANCH, EngineRepository, Git, GodotProject, GodotVersion,
     LaunchError, NoProgress, ProjectList, RepoStatus, Settings, SyncState, SystemCommandRunner,
     SystemLauncher, Target, UpdateOutcome, Variant, VersionControl, VersionPattern,
-    engine_for_project, find_project_dir, open_editor, open_version, run_project,
+    engine_for_project, find_project_dir, find_project_dir_in_tree, is_empty_dir, open_editor,
+    open_version, repo_name_from_url, run_project,
 };
 
 use crate::cli::{Command, ProjectCommand, SettingsCommand};
@@ -496,7 +497,7 @@ async fn ensure_project_engine(ctx: &Context, project: &GodotProject) -> Result<
 // Clone.
 
 async fn clone(ctx: &Context, url: &str, dir: Option<PathBuf>) -> Result<()> {
-    let dest = dir.unwrap_or_else(|| PathBuf::from(dir_from_url(url)));
+    let dest = dir.unwrap_or_else(|| PathBuf::from(repo_name_from_url(url)));
     if dest.exists() && !is_empty_dir(&dest) {
         bail!("{} already exists and is not empty", dest.display());
     }
@@ -506,18 +507,21 @@ async fn clone(ctx: &Context, url: &str, dir: Option<PathBuf>) -> Result<()> {
         .map_err(|err| anyhow!("could not clone: {err}"))?;
     say!(ctx, "Cloned into {}", dest.display());
 
-    // Add it as a project when it has a project.godot. A repo without one is
-    // still cloned, it just is not tracked.
-    match GodotProject::load(&dest) {
-        Ok(project) => {
-            let canonical = std::fs::canonicalize(&dest).unwrap_or_else(|_| dest.clone());
+    // Add it as a project when it has a project.godot. The file may sit in a
+    // subfolder of the repository, so search the cloned tree for it. A repo
+    // without one is still cloned, it just is not tracked.
+    match find_project_dir_in_tree(&dest).and_then(|dir| {
+        GodotProject::load(&dir).ok().map(|project| (dir, project))
+    }) {
+        Some((project_dir, project)) => {
+            let canonical = std::fs::canonicalize(&project_dir).unwrap_or(project_dir);
             let file = ctx.paths.projects_file();
             let mut list = ProjectList::load(&file)?;
             list.add(&canonical, project.name.clone());
             list.save(&file)?;
-            say!(ctx, "Added it to your project list.");
+            say!(ctx, "Added {} to your project list.", canonical.display());
         }
-        Err(_) => {
+        None => {
             say!(
                 ctx,
                 "Note: no project.godot was found, so it was not added as a project."
@@ -674,44 +678,9 @@ fn describe_block(reason: BlockReason) -> String {
     }
 }
 
-/// True when the folder has no entries, or cannot be read.
-fn is_empty_dir(dir: &Path) -> bool {
-    std::fs::read_dir(dir)
-        .map(|mut entries| entries.next().is_none())
-        .unwrap_or(true)
-}
-
-/// Derive a folder name from a repository url. Drops a trailing slash and a
-/// trailing .git, and takes the last path or host segment.
-fn dir_from_url(url: &str) -> String {
-    let trimmed = url.trim_end_matches('/');
-    let last = trimmed.rsplit(['/', ':']).next().unwrap_or(trimmed);
-    let name = last.strip_suffix(".git").unwrap_or(last);
-    if name.is_empty() {
-        "repository".to_string()
-    } else {
-        name.to_string()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn dir_from_url_handles_common_forms() {
-        assert_eq!(dir_from_url("https://github.com/owner/game.git"), "game");
-        assert_eq!(dir_from_url("https://github.com/owner/game"), "game");
-        assert_eq!(dir_from_url("https://github.com/owner/game/"), "game");
-        assert_eq!(dir_from_url("git@github.com:owner/game.git"), "game");
-        assert_eq!(dir_from_url("game"), "game");
-    }
-
-    #[test]
-    fn dir_from_url_falls_back_when_empty() {
-        assert_eq!(dir_from_url("https://example.test/"), "example.test");
-        assert_eq!(dir_from_url("/"), "repository");
-    }
 
     #[test]
     fn describe_sync_covers_each_state() {
@@ -781,19 +750,5 @@ mod tests {
         );
         assert_eq!(variant_list(&[Variant::Mono]), "mono");
         assert_eq!(variant_list(&[]), "");
-    }
-
-    #[test]
-    fn is_empty_dir_reports_contents() {
-        let dir = std::env::temp_dir()
-            .join("godello-cmd-tests")
-            .join("empty-check");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        assert!(is_empty_dir(&dir));
-        std::fs::write(dir.join("a"), b"x").unwrap();
-        assert!(!is_empty_dir(&dir));
-        // A missing folder reads as empty so a clone into it can proceed.
-        assert!(is_empty_dir(&dir.join("missing")));
     }
 }

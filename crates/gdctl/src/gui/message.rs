@@ -214,10 +214,12 @@ pub enum Message {
     CloneUrlChanged(String),
     /// Dismiss the clone dialog.
     CancelClone,
-    /// Pick a destination folder and clone into it.
+    /// Open the folder picker to choose where the clone goes.
+    ChooseCloneDir,
+    /// The folder picker returned, with the chosen folder or nothing.
+    CloneDirPicked(Option<PathBuf>),
+    /// Clone into the chosen folder using the entered url.
     StartClone,
-    /// The destination folder was picked for a clone.
-    CloneDestinationPicked { url: String, dest: Option<PathBuf> },
     /// A clone finished, with the added project entry or an error.
     Cloned(Result<Option<ProjectEntry>, String>),
 }

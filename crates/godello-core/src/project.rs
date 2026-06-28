@@ -10,6 +10,7 @@
 //! and leaves the rest of the file untouched, so a user's project.godot is never
 //! reformatted.
 
+use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -123,6 +124,51 @@ pub fn find_project_dir(start: impl AsRef<Path>) -> Option<PathBuf> {
         current = dir.parent();
     }
     None
+}
+
+/// How deep the downward search descends. A cloned repository keeps its project
+/// near the top, so a shallow bound finds it without walking a deep tree.
+const MAX_SEARCH_DEPTH: usize = 6;
+
+/// Search a folder and the folders under it for the first one that holds
+/// project.godot. The walk is breadth first, so the project nearest the top wins
+/// when a repository nests it under a subfolder. Hidden folders such as .git are
+/// skipped, and the depth is bounded so a large tree does not take long. Among
+/// folders at the same depth the search is ordered by name, so the result is
+/// stable.
+pub fn find_project_dir_in_tree(root: impl AsRef<Path>) -> Option<PathBuf> {
+    let mut queue: VecDeque<(PathBuf, usize)> = VecDeque::new();
+    queue.push_back((root.as_ref().to_path_buf(), 0));
+    while let Some((dir, depth)) = queue.pop_front() {
+        if dir.join(PROJECT_FILE).is_file() {
+            return Some(dir);
+        }
+        if depth >= MAX_SEARCH_DEPTH {
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut children: Vec<PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir() && !is_hidden(path))
+            .collect();
+        children.sort();
+        for child in children {
+            queue.push_back((child, depth + 1));
+        }
+    }
+    None
+}
+
+/// True when a path's final component starts with a dot, such as .git or
+/// .github. These never hold a Godot project, so the search skips them.
+fn is_hidden(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.starts_with('.'))
+        .unwrap_or(false)
 }
 
 /// True when the folder has a C# solution or project file next to project.godot.
@@ -623,5 +669,67 @@ run/main_scene="res://main.tscn"
     fn find_returns_none_when_there_is_no_project() {
         let dir = scratch("find-none");
         assert_eq!(find_project_dir(&dir), None);
+    }
+
+    #[test]
+    fn tree_search_finds_a_project_at_the_top() {
+        let root = scratch("tree-top");
+        write_project(&root, GODOT4);
+        assert_eq!(find_project_dir_in_tree(&root), Some(root));
+    }
+
+    #[test]
+    fn tree_search_finds_a_nested_project() {
+        let root = scratch("tree-nested");
+        let nested = root.join("game").join("client");
+        fs::create_dir_all(&nested).unwrap();
+        write_project(&nested, GODOT4);
+        assert_eq!(find_project_dir_in_tree(&root), Some(nested));
+    }
+
+    #[test]
+    fn tree_search_prefers_the_shallowest_project() {
+        // A repository may hold more than one project.godot. The one nearest the
+        // top is the project, so a deeper one must not win.
+        let root = scratch("tree-shallow");
+        let shallow = root.join("main");
+        let deep = root.join("addons").join("sample").join("demo");
+        fs::create_dir_all(&shallow).unwrap();
+        fs::create_dir_all(&deep).unwrap();
+        write_project(&shallow, GODOT4);
+        write_project(&deep, GODOT4);
+        assert_eq!(find_project_dir_in_tree(&root), Some(shallow));
+    }
+
+    #[test]
+    fn tree_search_skips_hidden_folders() {
+        // A project.godot inside a hidden folder such as .git is not a real
+        // project and must be ignored.
+        let root = scratch("tree-hidden");
+        let hidden = root.join(".git").join("templates");
+        fs::create_dir_all(&hidden).unwrap();
+        write_project(&hidden, GODOT4);
+        assert_eq!(find_project_dir_in_tree(&root), None);
+    }
+
+    #[test]
+    fn tree_search_returns_none_when_nothing_is_found() {
+        let root = scratch("tree-none");
+        fs::create_dir_all(root.join("src").join("assets")).unwrap();
+        assert_eq!(find_project_dir_in_tree(&root), None);
+    }
+
+    #[test]
+    fn tree_search_stops_at_the_depth_bound() {
+        // A project buried below the search bound is not found, so a deeply nested
+        // tree cannot make the search run long.
+        let root = scratch("tree-deep");
+        let mut deep = root.clone();
+        for level in 0..(MAX_SEARCH_DEPTH + 2) {
+            deep = deep.join(format!("d{level}"));
+        }
+        fs::create_dir_all(&deep).unwrap();
+        write_project(&deep, GODOT4);
+        assert_eq!(find_project_dir_in_tree(&root), None);
     }
 }
