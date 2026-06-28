@@ -9,9 +9,10 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 use godello_core::{Variant, VersionPattern};
 
-/// The version shown by gdctl. A release build sets GODELLO_VERSION so the binary
-/// reports the version the release was tagged with. A normal build falls back to
-/// the version in Cargo.toml.
+/// The version shown by gdctl. The build script sets GODELLO_VERSION from the
+/// release version or from git, so the binary reports the version it was actually
+/// built at. The fallback to the crate version only matters if that step is
+/// skipped.
 pub const VERSION: &str = match option_env!("GODELLO_VERSION") {
     Some(version) => version,
     None => env!("CARGO_PKG_VERSION"),

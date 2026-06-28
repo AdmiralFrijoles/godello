@@ -7,9 +7,12 @@
 use std::path::Path;
 
 use godello_core::{CsharpBuildTool, Tool, Variant};
-use iced::widget::{Row, button, checkbox, column, container, pick_list, row, scrollable, text};
+use iced::widget::{
+    Row, button, checkbox, column, container, pick_list, row, scrollable, space, text,
+};
 use iced::{Alignment, Element, Length};
 
+use crate::cli::VERSION;
 use crate::gui::state::{App, SettingsTab};
 use crate::gui::{Message, style, themes, widgets};
 
@@ -36,9 +39,22 @@ pub fn view(state: &App) -> Element<'_, Message> {
         scrollable(container(form).padding([0.0, style::GAP_S]))
             .spacing(style::GAP_S)
             .height(Length::Fill),
+        version_footer(),
     ]
     .spacing(style::GAP_M)
     .height(Length::Fill)
+    .into()
+}
+
+/// A muted line at the bottom showing the app name and version. It stays in view
+/// under every tab so the running version is always easy to find.
+fn version_footer() -> Element<'static, Message> {
+    row![
+        space::horizontal(),
+        text(format!("Godello v{VERSION}"))
+            .size(style::TEXT_CAPTION)
+            .style(style::muted_text),
+    ]
     .into()
 }
 

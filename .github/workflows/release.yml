@@ -141,6 +141,10 @@ jobs:
           chmod +x "$tool"
 
           export APPIMAGE_EXTRACT_AND_RUN=1
+          # VERSION is embedded into the AppImage metadata by the packer, so the
+          # version travels with the file itself and not just its name. OUTPUT
+          # sets the file name.
+          export VERSION="$version"
           export OUTPUT="Godello-$version-$arch.AppImage"
           "./$tool" \
             --appdir "$appdir" \
